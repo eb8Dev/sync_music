@@ -1,11 +1,13 @@
 import 'dart:async';
+
 import 'package:flutter/material.dart';
-import 'package:qr_flutter/qr_flutter.dart';
+import 'package:flutter/services.dart';
 import 'package:socket_io_client/socket_io_client.dart' as IO;
 import 'package:sync_music/party_screen.dart';
 import 'package:sync_music/services/youtube_service.dart';
 import 'package:sync_music/widgets/glass_card.dart';
 import 'package:youtube_explode_dart/youtube_explode_dart.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 
 class WaitingScreen extends StatefulWidget {
   final IO.Socket socket;
@@ -26,9 +28,10 @@ class WaitingScreen extends StatefulWidget {
 class _WaitingScreenState extends State<WaitingScreen> {
   final YouTubeService _ytService = YouTubeService();
   final TextEditingController searchCtrl = TextEditingController();
-  
+
   List<dynamic> queue = [];
   List<Video> searchResults = [];
+  List<String> logs = [];
   bool isSearching = false;
   Timer? _debounce;
 
@@ -36,6 +39,7 @@ class _WaitingScreenState extends State<WaitingScreen> {
   late dynamic _queueListener;
   late dynamic _playbackListener;
   late dynamic _errorListener;
+  late dynamic _infoListener;
 
   @override
   void initState() {
@@ -76,14 +80,25 @@ class _WaitingScreenState extends State<WaitingScreen> {
 
     _errorListener = (msg) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg.toString())));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(msg.toString())));
       Navigator.popUntil(context, (route) => route.isFirst);
+    };
+
+    _infoListener = (msg) {
+      if (!mounted) return;
+      setState(() {
+        logs.add(msg.toString());
+      });
+      // Scroll to bottom if needed, but for small list it's fine
     };
 
     // ---- Attach Listeners ----
     widget.socket.on("QUEUE_UPDATED", _queueListener);
     widget.socket.on("PLAYBACK_UPDATE", _playbackListener);
     widget.socket.on("ERROR", _errorListener);
+    widget.socket.on("INFO", _infoListener);
 
     // Initial check
     if (widget.party["isPlaying"] == true) {
@@ -94,11 +109,45 @@ class _WaitingScreenState extends State<WaitingScreen> {
     }
   }
 
+  void _showQRCode() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF1E1E1E),
+        title: const Text(
+          "Scan to Join",
+          style: TextStyle(color: Colors.white),
+          textAlign: TextAlign.center,
+        ),
+        content: SizedBox(
+          width: 250,
+          height: 250,
+          child: Center(
+            child: QrImageView(
+              data: widget.party["id"],
+              version: QrVersions.auto,
+              size: 250.0,
+              backgroundColor: Colors.white,
+              padding: const EdgeInsets.all(16),
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text("Close"),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   void dispose() {
     widget.socket.off("QUEUE_UPDATED", _queueListener);
     widget.socket.off("PLAYBACK_UPDATE", _playbackListener);
     widget.socket.off("ERROR", _errorListener);
+    widget.socket.off("INFO", _infoListener);
     _ytService.dispose();
     searchCtrl.dispose();
     _debounce?.cancel();
@@ -108,7 +157,7 @@ class _WaitingScreenState extends State<WaitingScreen> {
   // ---- Search & Add ----
   void _onSearchChanged(String query) {
     if (_debounce?.isActive ?? false) _debounce!.cancel();
-    
+
     if (query.trim().isEmpty) {
       setState(() {
         searchResults = [];
@@ -133,9 +182,9 @@ class _WaitingScreenState extends State<WaitingScreen> {
     widget.socket.emit("ADD_TRACK", {
       "partyId": widget.party["id"],
       "track": {
-        "url": video.url, 
-        "title": video.title, 
-        "addedBy": widget.username
+        "url": video.url,
+        "title": video.title,
+        "addedBy": widget.username,
       },
     });
     searchCtrl.clear();
@@ -148,25 +197,11 @@ class _WaitingScreenState extends State<WaitingScreen> {
     widget.socket.emit("PLAY", {"partyId": widget.party["id"]});
   }
 
-  // ---- QR ----
-  void _showQr() {
-    showDialog(
-      context: context,
-      builder: (_) => AlertDialog(
-        backgroundColor: const Color(0xFF1E1E1E),
-        title: const Text("Scan to Join", style: TextStyle(color: Colors.white)),
-        content: SizedBox(
-          width: 200, height: 200,
-          child: Center(
-            child: QrImageView(
-              data: widget.party["id"],
-              backgroundColor: Colors.white,
-              size: 200,
-            ),
-          ),
-        ),
-      ),
-    );
+  void _copyCode() {
+    Clipboard.setData(ClipboardData(text: widget.party["id"]));
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text("Party Code Copied!")));
   }
 
   @override
@@ -175,9 +210,27 @@ class _WaitingScreenState extends State<WaitingScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text("CODE: ${widget.party["id"]}"),
+        title: InkWell(
+          onTap: _copyCode,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text("CODE: ${widget.party["id"]}"),
+              const SizedBox(width: 8),
+              const Icon(Icons.copy, size: 16),
+            ],
+          ),
+        ),
         actions: [
-          IconButton(icon: const Icon(Icons.qr_code), onPressed: _showQr),
+          Padding(
+            padding: const EdgeInsets.only(left: 8.0),
+            child: IconButton(
+              icon: const Icon(Icons.qr_code, size: 20, color: Colors.white70),
+              constraints: const BoxConstraints(),
+              padding: EdgeInsets.zero,
+              onPressed: _showQRCode,
+            ),
+          ),
         ],
       ),
       body: Container(
@@ -191,7 +244,7 @@ class _WaitingScreenState extends State<WaitingScreen> {
         child: Column(
           children: [
             const SizedBox(height: 16),
-            
+
             // ---- Status ----
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 24),
@@ -201,24 +254,57 @@ class _WaitingScreenState extends State<WaitingScreen> {
                   padding: const EdgeInsets.all(16),
                   child: Row(
                     children: [
-                      Icon(isHost ? Icons.local_activity : Icons.headset, color: Theme.of(context).primaryColor),
+                      Icon(
+                        isHost ? Icons.local_activity : Icons.headset,
+                        color: Theme.of(context).primaryColor,
+                      ),
                       const SizedBox(width: 16),
                       Text(
                         isHost ? "YOU ARE HOST" : "WAITING FOR HOST",
-                        style: const TextStyle(fontWeight: FontWeight.bold, letterSpacing: 1.2),
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 1.2,
+                        ),
                       ),
                     ],
                   ),
                 ),
               ),
             ),
-            
-            const SizedBox(height: 24),
+
+            if (logs.isNotEmpty)
+              Container(
+                height: 100,
+                margin: const EdgeInsets.symmetric(
+                  horizontal: 24,
+                  vertical: 12,
+                ),
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Colors.black12,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: ListView.builder(
+                  reverse: true, // Newest at bottom
+                  itemCount: logs.length,
+                  itemBuilder: (_, i) => Text(
+                    logs[logs.length - 1 - i],
+                    style: const TextStyle(color: Colors.white54, fontSize: 12),
+                  ),
+                ),
+              ),
+
+            const SizedBox(height: 12),
 
             // ---- Queue ----
             Expanded(
               child: queue.isEmpty
-                  ? Center(child: Text("Queue is empty", style: TextStyle(color: Colors.white.withOpacity(0.3))))
+                  ? Center(
+                      child: Text(
+                        "Queue is empty",
+                        style: TextStyle(color: Colors.white.withOpacity(0.3)),
+                      ),
+                    )
                   : ListView.builder(
                       padding: const EdgeInsets.symmetric(horizontal: 24),
                       itemCount: queue.length,
@@ -231,9 +317,22 @@ class _WaitingScreenState extends State<WaitingScreen> {
                             borderRadius: BorderRadius.circular(12),
                             child: ListTile(
                               dense: true,
-                              leading: Text("${i + 1}", style: const TextStyle(color: Colors.white54)),
-                              title: Text(track["title"], maxLines: 1, overflow: TextOverflow.ellipsis),
-                              subtitle: Text("By ${track["addedBy"] ?? 'Unknown'}", style: TextStyle(color: Theme.of(context).primaryColor, fontSize: 10)),
+                              leading: Text(
+                                "${i + 1}",
+                                style: const TextStyle(color: Colors.white54),
+                              ),
+                              title: Text(
+                                track["title"],
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              subtitle: Text(
+                                "By ${track["addedBy"] ?? 'Unknown'}",
+                                style: TextStyle(
+                                  color: Theme.of(context).primaryColor,
+                                  fontSize: 10,
+                                ),
+                              ),
                             ),
                           ),
                         );
@@ -253,27 +352,49 @@ class _WaitingScreenState extends State<WaitingScreen> {
                     decoration: InputDecoration(
                       hintText: "Search YouTube songs...",
                       prefixIcon: const Icon(Icons.search),
-                      suffixIcon: isSearching 
-                          ? const SizedBox(width: 20, height: 20, child: Padding(padding: EdgeInsets.all(10), child: CircularProgressIndicator(strokeWidth: 2))) 
+                      suffixIcon: isSearching
+                          ? const SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: Padding(
+                                padding: EdgeInsets.all(10),
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              ),
+                            )
                           : null,
                     ),
                   ),
-                  
+
                   // Search Results List
                   if (searchResults.isNotEmpty)
                     Container(
                       constraints: const BoxConstraints(maxHeight: 200),
                       margin: const EdgeInsets.only(top: 8),
-                      decoration: BoxDecoration(color: const Color(0xFF1E1E1E), borderRadius: BorderRadius.circular(12)),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF1E1E1E),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
                       child: ListView.separated(
                         shrinkWrap: true,
                         itemCount: searchResults.length,
-                        separatorBuilder: (_, __) => const Divider(height: 1, color: Colors.white10),
+                        separatorBuilder: (_, __) =>
+                            const Divider(height: 1, color: Colors.white10),
                         itemBuilder: (_, i) {
                           final video = searchResults[i];
                           return ListTile(
-                            leading: Image.network(video.thumbnails.lowResUrl, width: 40, fit: BoxFit.cover),
-                            title: Text(video.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12)),
+                            leading: Image.network(
+                              video.thumbnails.lowResUrl,
+                              width: 40,
+                              fit: BoxFit.cover,
+                            ),
+                            title: Text(
+                              video.title,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(fontSize: 12),
+                            ),
                             onTap: () => _addVideo(video),
                           );
                         },
@@ -290,7 +411,7 @@ class _WaitingScreenState extends State<WaitingScreen> {
                         onPressed: _startParty,
                       ),
                     ),
-                  ]
+                  ],
                 ],
               ),
             ),

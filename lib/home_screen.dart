@@ -3,6 +3,8 @@ import 'package:socket_io_client/socket_io_client.dart' as IO;
 import 'package:sync_music/waiting_screen.dart';
 import 'package:sync_music/widgets/custom_button.dart';
 import 'package:sync_music/widgets/glass_card.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:sync_music/qr_scanner_screen.dart';
 
 const SERVER_URL = "https://sync-music-server.onrender.com";
 
@@ -27,7 +29,27 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
+    _loadSession();
     _initSocket();
+  }
+
+  Future<void> _loadSession() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      lastPartyId = prefs.getString("lastPartyId");
+      isHost = prefs.getBool("isHost") ?? false;
+      final savedName = prefs.getString("username");
+      if (savedName != null) {
+        nameCtrl.text = savedName;
+      }
+    });
+  }
+
+  Future<void> _saveSession(String partyId, bool host, String username) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString("lastPartyId", partyId);
+    await prefs.setBool("isHost", host);
+    await prefs.setString("username", username);
   }
 
   void _initSocket() {
@@ -53,24 +75,28 @@ class _HomeScreenState extends State<HomeScreen> {
     socket.on("PARTY_STATE", (data) {
       debugPrint("PARTY_STATE received: $data");
 
+      final partyId = data["id"];
+      final hostStatus = data["isHost"] == true;
+      final username =
+          nameCtrl.text.trim().isEmpty ? "Guest" : nameCtrl.text.trim();
+
       setState(() {
         connecting = false;
-        lastPartyId = data["id"];
-        isHost = data["isHost"] == true;
+        lastPartyId = partyId;
+        isHost = hostStatus;
       });
 
-      final username = nameCtrl.text.trim().isEmpty
-          ? "Guest"
-          : nameCtrl.text.trim();
+      _saveSession(partyId, hostStatus, username);
 
       Navigator.push(
         context,
         MaterialPageRoute(
-          builder: (_) => WaitingScreen(
-            socket: socket,
-            party: Map<String, dynamic>.from(data),
-            username: username,
-          ),
+          builder:
+              (_) => WaitingScreen(
+                socket: socket,
+                party: Map<String, dynamic>.from(data),
+                username: username,
+              ),
         ),
       );
     });
@@ -112,7 +138,25 @@ class _HomeScreenState extends State<HomeScreen> {
 
     setState(() => connecting = true);
 
-    socket.emit("JOIN_PARTY", code);
+    socket.emit("JOIN_PARTY", {
+      "partyId": code,
+      "username": nameCtrl.text.trim(),
+    });
+  }
+
+  Future<void> _scanQR() async {
+    final result = await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (context) => const QRScannerScreen()),
+    );
+
+    if (result != null && result is String) {
+      setState(() {
+        codeCtrl.text = result;
+      });
+      // Optionally auto-join:
+      // _joinParty();
+    }
   }
 
   @override
@@ -210,9 +254,14 @@ class _HomeScreenState extends State<HomeScreen> {
                                 controller: codeCtrl,
                                 textCapitalization:
                                     TextCapitalization.characters,
-                                decoration: const InputDecoration(
+                                decoration: InputDecoration(
                                   labelText: "PARTY CODE",
-                                  prefixIcon: Icon(Icons.vpn_key_outlined),
+                                  prefixIcon: const Icon(Icons.vpn_key_outlined),
+                                  suffixIcon: IconButton(
+                                    icon: const Icon(Icons.qr_code_scanner),
+                                    color: Theme.of(context).primaryColor,
+                                    onPressed: _scanQR,
+                                  ),
                                 ),
                               ),
                               const SizedBox(height: 16),
