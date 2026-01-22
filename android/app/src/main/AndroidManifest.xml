@@ -2,7 +2,7 @@
     <uses-permission android:name="android.permission.INTERNET"/>
 
     <application
-        android:label="sync_music"
+        android:label="Sync Music"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity

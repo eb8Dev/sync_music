@@ -5,6 +5,7 @@ import 'package:sync_music/widgets/custom_button.dart';
 import 'package:sync_music/widgets/glass_card.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sync_music/qr_scanner_screen.dart';
+import 'package:in_app_update/in_app_update.dart';
 
 const SERVER_URL = "https://sync-music-server.onrender.com";
 
@@ -29,8 +30,20 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
+    _checkForUpdate();
     _loadSession();
     _initSocket();
+  }
+
+  Future<void> _checkForUpdate() async {
+    try {
+      final info = await InAppUpdate.checkForUpdate();
+      if (info.updateAvailability == UpdateAvailability.updateAvailable) {
+        await InAppUpdate.performImmediateUpdate();
+      }
+    } catch (e) {
+      debugPrint("Failed to check for updates: $e");
+    }
   }
 
   Future<void> _loadSession() async {
