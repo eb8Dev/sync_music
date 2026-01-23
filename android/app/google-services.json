@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "451724794746",
+    "project_id": "sync-music-9f1f3",
+    "storage_bucket": "sync-music-9f1f3.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:451724794746:android:a833c84a7777b39ad894c3",
+        "android_client_info": {
+          "package_name": "com.eb.sync_music"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDgeQLlU3FObdCjzLKQcARcb2DkBlYnU6k"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

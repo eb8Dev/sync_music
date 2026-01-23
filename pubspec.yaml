@@ -43,6 +43,17 @@ dependencies:
   youtube_explode_dart: ^3.0.5
   shared_preferences: ^2.2.0
   in_app_update: ^4.2.2
+  firebase_core: ^4.4.0
+  firebase_crashlytics: ^5.0.7
+  firebase_analytics: ^12.1.1
+  url_launcher: ^6.3.2
+  in_app_review: ^2.0.11
+  firebase_performance: ^0.11.1+4
+  firebase_remote_config: ^6.1.4
+  wakelock_plus: ^1.4.0
+  firebase_messaging: ^16.1.1
+  flutter_local_notifications: ^19.5.0
+  share_plus: ^12.0.1
 
 dev_dependencies:
   flutter_test:

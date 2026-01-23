@@ -1,43 +1,89 @@
 # Sync Music 🎵
 
-**Sync Music** is a real-time collaborative music listening platform that lets you party with friends, no matter where they are. Experience perfectly synchronized playback, democratic queue management, and interactive social features in a beautifully designed Flutter app.
+A real-time music synchronization app built with Flutter and Node.js (Socket.IO). Host parties, join with friends, and listen to music together perfectly synchronized across multiple devices.
 
-## 🚀 Overview
+## ✨ Features
 
-Sync Music solves the "3, 2, 1, Play!" problem. Whether you're hosting a silent disco, a road trip with multiple cars, or just hanging out online, Sync Music keeps everyone on the same beat. One person hosts, everyone listens, and the whole party collaborates on the playlist.
+### 🎧 Core Features
+*   **Real-time Synchronization:** Music plays, pauses, seeks, and skips at the exact same time for everyone.
+*   **Host & Guest Roles:**
+    *   **Host:** Full control over playback (Play/Pause, Seek, Skip, Remove tracks) and party management (End party).
+    *   **Guest:** Suggest songs, vote to skip, and enjoy the show.
+*   **YouTube Integration:** Search and add any song from YouTube directly within the app.
+*   **Queue Management:** A shared playlist where everyone can contribute.
+*   **Smart Joining:**
+    *   **QR Code:** Scan a QR code to join instantly.
+    *   **Party Code:** Enter a short 6-character code.
+    *   **Deep Linking:** Share a link to invite friends directly.
 
-## ✨ Key Features
+### 🚀 Advanced Features
+*   **One-Way Notifications:** Receive alerts for party invites and app updates (FCM).
+*   **Live Reactions:** Send floating emojis (🔥, ❤️, 🎉) that animate on everyone's screen in real-time.
+*   **User Avatars:** Choose a fun musical emoji avatar to represent yourself in the party.
+*   **Vote to Skip:** Guests can vote to skip the current track (requires majority).
+*   **Performance Monitoring:** Integrated Firebase Performance Monitoring for optimized experience.
+*   **Wakelock:** Keeps the screen on and music playing even when idle.
 
-### 🎧 **Synchronized Playback**
-*   **Real-Time Sync:** Music plays at the exact same millisecond on all devices.
-*   **Smart Seek:** If you join late or get disconnected, the app automatically syncs you to the current position.
-*   **Host Controls:** The host has full control to Play, Pause, and Scrub tracks, instantly reflecting on all guest devices.
-
-### 🗳️ **Democratic Party Mode**
-*   **Vote to Skip:** Guests can vote to skip the current track. If >80% of the party agrees, the song skips automatically.
-*   **Collaborative Queue:** Anyone can search and add songs from YouTube to the shared queue.
-*   **Live Stats:** See exactly how many people are vibing with you in real-time.
-
-### ⚡ **Instant Joining**
-*   **QR Code Sharing:** Hosts can display a QR code for guests to scan and join instantly.
-*   **Simple Codes:** Alternatively, join using a short 6-character party code.
-*   **No Sign-Up:** Just enter your name and jump straight into the music.
-
-### 🎉 **Social & Interactive**
-*   **Live Reactions:** Send floating emojis (🔥, ❤️, 🎉) that animate across everyone's screen to show your hype.
-*   **Guest Notifications:** Get notified when the host pauses the music or changes the track.
-
-### 🛡️ **Host Powers**
-*   **Queue Management:** Hosts can delete specific tracks from the queue to keep the vibe right.
-*   **End Party:** Gracefully end the session for everyone with a single tap.
-
-## 📱 Tech Stack
+## 🛠 Tech Stack
 
 *   **Frontend:** Flutter (Dart)
 *   **Backend:** Node.js, Express, Socket.IO
-*   **Media:** YouTube Explode & YouTube Player
-*   **State Management:** Real-time WebSocket event streams
+*   **Database:** In-memory (transient party state)
+*   **Services:**
+    *   **Firebase:** Crashlytics, Analytics, Remote Config, Cloud Messaging (FCM).
+    *   **Media:** `youtube_player_flutter`, `youtube_explode_dart`.
+    *   **Utils:** `wakelock_plus`, `qr_flutter`, `mobile_scanner`, `share_plus`.
 
----
+## 📱 Screenshots
 
-*Made with ❤️ for music lovers.*
+| Home Screen | Waiting Screen | Party Screen |
+|:---:|:---:|:---:|
+| <img src="screenshots/home.png" width="200" /> | <img src="screenshots/waiting.png" width="200" /> | <img src="screenshots/party.png" width="200" /> |
+
+*(Note: Add actual screenshots to a `screenshots` folder in your repo)*
+
+## 🚀 Getting Started
+
+### Prerequisites
+*   Flutter SDK (3.10+)
+*   Node.js (16+)
+*   Firebase Project (for notifications/analytics)
+
+### Installation
+
+1.  **Clone the repository:**
+    ```bash
+    git clone https://github.com/yourusername/sync_music.git
+    cd sync_music
+    ```
+
+2.  **Install dependencies:**
+    ```bash
+    flutter pub get
+    cd server && npm install
+    ```
+
+3.  **Firebase Setup:**
+    *   Create a Firebase project.
+    *   Download `google-services.json` and place it in `android/app/`.
+    *   Enable **Remote Config**, **Crashlytics**, and **Messaging**.
+
+4.  **Run the Backend:**
+    ```bash
+    cd server
+    node index.js
+    ```
+    *(Or deploy to Render/Heroku)*
+
+5.  **Run the App:**
+    ```bash
+    flutter run
+    ```
+
+## 🤝 Contributing
+
+Contributions are welcome! Please fork the repository and submit a pull request.
+
+## 📄 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.

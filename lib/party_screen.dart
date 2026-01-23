@@ -7,6 +7,8 @@ import 'package:sync_music/widgets/glass_card.dart';
 import 'package:sync_music/widgets/floating_emojis.dart';
 import 'package:sync_music/services/youtube_service.dart';
 import 'package:youtube_explode_dart/youtube_explode_dart.dart' as yt;
+import 'package:wakelock_plus/wakelock_plus.dart';
+import 'package:share_plus/share_plus.dart';
 
 class PartyScreen extends StatefulWidget {
   final IO.Socket socket;
@@ -59,6 +61,7 @@ class _PartyScreenState extends State<PartyScreen> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    WakelockPlus.enable();
 
     queue = List.from(widget.party["queue"] ?? []);
     currentIndex = widget.party["currentIndex"] ?? 0;
@@ -397,8 +400,16 @@ class _PartyScreenState extends State<PartyScreen> with WidgetsBindingObserver {
     );
   }
 
+  void _shareParty() {
+    Share.share(
+      "Join my music party on Sync Music! Code: ${widget.party["id"]}",
+      subject: "Join Sync Music Party",
+    );
+  }
+
   @override
   void dispose() {
+    WakelockPlus.disable();
     WidgetsBinding.instance.removeObserver(this);
     widget.socket.off("PLAYBACK_UPDATE", _playbackListener);
     widget.socket.off("QUEUE_UPDATED", _queueListener);
@@ -457,16 +468,26 @@ class _PartyScreenState extends State<PartyScreen> with WidgetsBindingObserver {
                                   color: Colors.white,
                                 ),
                               ),
-                              if (isHost)
-                                Padding(
-                                  padding: const EdgeInsets.only(left: 8.0),
-                                  child: IconButton(
-                                    icon: const Icon(Icons.qr_code, size: 20, color: Colors.white70),
+                              Row(
+                                children: [
+                                  IconButton(
+                                    icon: const Icon(Icons.share, size: 20, color: Colors.white70),
                                     constraints: const BoxConstraints(),
-                                    padding: EdgeInsets.zero,
-                                    onPressed: _showQRCode,
+                                    padding: const EdgeInsets.only(right: 8),
+                                    onPressed: _shareParty,
                                   ),
-                                ),
+                                  if (isHost)
+                                    Padding(
+                                      padding: const EdgeInsets.only(right: 8.0),
+                                      child: IconButton(
+                                        icon: const Icon(Icons.qr_code, size: 20, color: Colors.white70),
+                                        constraints: const BoxConstraints(),
+                                        padding: EdgeInsets.zero,
+                                        onPressed: _showQRCode,
+                                      ),
+                                    ),
+                                ],
+                              ),
                               const SizedBox(height: 4),
                               Row(
                                   children: [

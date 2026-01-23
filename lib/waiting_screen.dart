@@ -8,6 +8,8 @@ import 'package:sync_music/services/youtube_service.dart';
 import 'package:sync_music/widgets/glass_card.dart';
 import 'package:youtube_explode_dart/youtube_explode_dart.dart';
 import 'package:qr_flutter/qr_flutter.dart';
+import 'package:wakelock_plus/wakelock_plus.dart';
+import 'package:share_plus/share_plus.dart';
 
 class WaitingScreen extends StatefulWidget {
   final IO.Socket socket;
@@ -44,6 +46,7 @@ class _WaitingScreenState extends State<WaitingScreen> {
   @override
   void initState() {
     super.initState();
+    WakelockPlus.enable();
     queue = List.from(widget.party["queue"] ?? []);
 
     // ---- Define Listeners ----
@@ -142,8 +145,16 @@ class _WaitingScreenState extends State<WaitingScreen> {
     );
   }
 
+  void _shareParty() {
+    Share.share(
+      "Join my music party on Sync Music! Code: ${widget.party["id"]}",
+      subject: "Join Sync Music Party",
+    );
+  }
+
   @override
   void dispose() {
+    WakelockPlus.disable();
     widget.socket.off("QUEUE_UPDATED", _queueListener);
     widget.socket.off("PLAYBACK_UPDATE", _playbackListener);
     widget.socket.off("ERROR", _errorListener);
@@ -222,6 +233,10 @@ class _WaitingScreenState extends State<WaitingScreen> {
           ),
         ),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.share, size: 20, color: Colors.white70),
+            onPressed: _shareParty,
+          ),
           Padding(
             padding: const EdgeInsets.only(left: 8.0),
             child: IconButton(
