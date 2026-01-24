@@ -46,7 +46,8 @@ class _PartyScreenState extends State<PartyScreen> with WidgetsBindingObserver {
   int votesCount = 0;
   int votesRequired = 0;
 
-  final StreamController<String> _reactionStreamCtrl = StreamController<String>.broadcast();
+  final StreamController<String> _reactionStreamCtrl =
+      StreamController<String>.broadcast();
 
   // Listeners
   late dynamic _playbackListener;
@@ -126,7 +127,7 @@ class _PartyScreenState extends State<PartyScreen> with WidgetsBindingObserver {
     widget.socket.on("PARTY_SIZE", _partySizeListener);
     widget.socket.on("VOTE_UPDATE", _voteUpdateListener);
     widget.socket.on("REACTION", _reactionListener);
-    
+
     // Request initial size
     // Note: The server should emit this on join, but we can also rely on subsequent updates.
 
@@ -147,9 +148,9 @@ class _PartyScreenState extends State<PartyScreen> with WidgetsBindingObserver {
         isHost = newHostId == widget.socket.id;
       });
       if (isHost) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("You are now the host!")),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text("You are now the host!")));
       }
     });
   }
@@ -168,17 +169,19 @@ class _PartyScreenState extends State<PartyScreen> with WidgetsBindingObserver {
     if (!mounted) return;
 
     final bool isPlaying = data["isPlaying"] == true;
-    
+
     // Notify guests about host actions
     if (!isHost && _isPlaying != isPlaying) {
-        ScaffoldMessenger.of(context).hideCurrentSnackBar();
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(isPlaying ? "Host started playing" : "Host paused playback"),
-            duration: const Duration(seconds: 2),
-            behavior: SnackBarBehavior.floating,
+      ScaffoldMessenger.of(context).hideCurrentSnackBar();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            isPlaying ? "Host started playing" : "Host paused playback",
           ),
-        );
+          duration: const Duration(seconds: 2),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
     }
 
     _isPlaying = isPlaying;
@@ -186,7 +189,7 @@ class _PartyScreenState extends State<PartyScreen> with WidgetsBindingObserver {
     if (!isPlaying) {
       _controller?.pause();
       // Force UI update to show Play button
-      setState(() {}); 
+      setState(() {});
       return;
     }
 
@@ -195,10 +198,10 @@ class _PartyScreenState extends State<PartyScreen> with WidgetsBindingObserver {
 
     // Check for end of queue state
     if (queue.isNotEmpty && index >= queue.length) {
-        setState(() {
-            currentIndex = index;
-        });
-        return;
+      setState(() {
+        currentIndex = index;
+      });
+      return;
     }
 
     if (queue.isEmpty) return;
@@ -307,6 +310,30 @@ class _PartyScreenState extends State<PartyScreen> with WidgetsBindingObserver {
     FocusScope.of(context).unfocus();
   }
 
+  void _leaveParty() {
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text("Leave Party"),
+        content: const Text("Are you sure you want to leave?"),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text("Cancel"),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () {
+              Navigator.pop(context); // Close dialog
+              Navigator.pop(context); // Go back to Home
+            },
+            child: const Text("Leave"),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _endParty() {
     showDialog(
       context: context,
@@ -401,9 +428,11 @@ class _PartyScreenState extends State<PartyScreen> with WidgetsBindingObserver {
   }
 
   void _shareParty() {
-    Share.share(
-      "Join my music party on Sync Music! Code: ${widget.party["id"]}",
-      subject: "Join Sync Music Party",
+    SharePlus.instance.share(
+      ShareParams(
+        text: "Join my music party on Sync Music! Code: ${widget.party["id"]}",
+        subject: "Join Sync Music Party",
+      ),
     );
   }
 
@@ -436,6 +465,312 @@ class _PartyScreenState extends State<PartyScreen> with WidgetsBindingObserver {
     final bool isEmptyQueue = queue.isEmpty;
     final bool showPlayer = !isEmptyQueue && !isEndOfQueue;
 
+    // --- WIDGET COMPONENTS ---
+    Widget header = Padding(
+      padding: const EdgeInsets.all(16),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                "PARTY: ${widget.party["id"]}",
+                style: const TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 2,
+                  color: Colors.white,
+                ),
+              ),
+              Row(
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.share, size: 20, color: Colors.white70),
+                    constraints: const BoxConstraints(),
+                    padding: const EdgeInsets.only(right: 8),
+                    onPressed: _shareParty,
+                  ),
+                  if (isHost)
+                    Padding(
+                      padding: const EdgeInsets.only(right: 8.0),
+                      child: IconButton(
+                        icon: const Icon(Icons.qr_code, size: 20, color: Colors.white70),
+                        constraints: const BoxConstraints(),
+                        padding: EdgeInsets.zero,
+                        onPressed: _showQRCode,
+                      ),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 4),
+              Row(
+                children: [
+                  const Icon(Icons.people, size: 14, color: Colors.white70),
+                  const SizedBox(width: 4),
+                  Text(
+                    "$partySize Online",
+                    style: const TextStyle(color: Colors.white70, fontSize: 12),
+                  ),
+                ],
+              ),
+            ],
+          ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            decoration: BoxDecoration(
+              color: isHost ? const Color(0xFFBB86FC) : const Color(0xFF03DAC6),
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Text(
+              isHost ? "HOST" : "GUEST",
+              style: const TextStyle(
+                color: Colors.black,
+                fontWeight: FontWeight.bold,
+                fontSize: 10,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    Widget player = AspectRatio(
+      aspectRatio: 16 / 9,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(16),
+        child: Container(
+          color: Colors.black,
+          child: showPlayer
+              ? (_controller == null
+                  ? Center(
+                      child: Text(
+                        _isPlaying ? "Loading..." : "Waiting...",
+                        style: const TextStyle(color: Colors.white54),
+                      ),
+                    )
+                  : YoutubePlayer(
+                      controller: _controller!,
+                      showVideoProgressIndicator: true,
+                      progressIndicatorColor: Theme.of(context).primaryColor,
+                      onEnded: (_) {
+                        if (isHost && _lastEndedIndex != currentIndex) {
+                          _lastEndedIndex = currentIndex;
+                          widget.socket.emit("TRACK_ENDED", {
+                            "partyId": widget.party["id"],
+                          });
+                        }
+                      },
+                      onReady: () {
+                        if (_serverStartedAt != null && _isPlaying) {
+                          final now = DateTime.now().millisecondsSinceEpoch;
+                          final seekMs = now - _serverStartedAt!;
+                          _controller!.seekTo(Duration(milliseconds: seekMs));
+                          _controller!.play();
+                        }
+                      },
+                    ))
+              : Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.queue_music, size: 48, color: Colors.white24),
+                      const SizedBox(height: 16),
+                      Text(
+                        isEndOfQueue ? "End of Queue" : "Queue is Empty",
+                        style: const TextStyle(
+                          color: Colors.white54,
+                          fontSize: 18,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        "Add songs to continue the party!",
+                        style: const TextStyle(color: Colors.white38),
+                      ),
+                    ],
+                  ),
+                ),
+        ),
+      ),
+    );
+
+    Widget reactions = Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+        children: ["🔥", "❤️", "🎉", "😂", "👋", "💃"].map((emoji) {
+          return GestureDetector(
+            onTap: () => _sendReaction(emoji),
+            child: Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.white10,
+                shape: BoxShape.circle,
+              ),
+              child: Text(
+                emoji,
+                style: const TextStyle(fontSize: 24),
+              ),
+            ),
+          );
+        }).toList(),
+      ),
+    );
+
+    Widget controls = Column(
+      children: [
+        if (!isHost)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
+            child: Column(
+              children: [
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    icon: const Icon(Icons.thumbs_up_down_outlined),
+                    label: Text(
+                      partySize < 5
+                          ? "Vote Skip (Need 5+ Users)"
+                          : "Vote to Skip ($votesCount/$votesRequired)",
+                    ),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: partySize < 5 ? Colors.grey : Colors.amber,
+                      foregroundColor: Colors.black,
+                    ),
+                    onPressed: partySize >= 5 ? _voteSkip : null,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    icon: const Icon(Icons.exit_to_app),
+                    label: const Text("LEAVE PARTY"),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.red.withValues(alpha: 0.8),
+                      foregroundColor: Colors.white,
+                    ),
+                    onPressed: _leaveParty,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        if (isHost)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24),
+            child: Column(
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  children: [
+                    IconButton(
+                      iconSize: 42,
+                      icon: const Icon(Icons.skip_previous),
+                      color: Colors.white,
+                      onPressed: currentIndex > 0 ? _prevTrack : null,
+                    ),
+                    IconButton(
+                      iconSize: 56,
+                      icon: Icon(
+                        _isPlaying
+                            ? Icons.pause_circle_filled
+                            : Icons.play_circle_fill,
+                      ),
+                      color: Theme.of(context).primaryColor,
+                      onPressed: _isPlaying ? _pause : _resyncPlay,
+                    ),
+                    IconButton(
+                      iconSize: 42,
+                      icon: const Icon(Icons.skip_next),
+                      color: Colors.white,
+                      onPressed:
+                          currentIndex < queue.length - 1 ? _nextTrack : null,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    icon: const Icon(Icons.stop_circle),
+                    label: const Text("END PARTY"),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.red,
+                      foregroundColor: Colors.white,
+                    ),
+                    onPressed: _endParty,
+                  ),
+                ),
+              ],
+            ),
+          ),
+      ],
+    );
+
+    Widget searchBar = Container(
+      padding: const EdgeInsets.all(16),
+      color: const Color(0xFF1E1E1E),
+      child: Column(
+        children: [
+          TextField(
+            controller: searchCtrl,
+            onChanged: _onSearchChanged,
+            decoration: InputDecoration(
+              hintText: "Search YouTube songs...",
+              prefixIcon: const Icon(Icons.search),
+              suffixIcon: isSearching
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : null,
+              filled: true,
+              fillColor: Colors.black,
+              contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(30),
+                borderSide: BorderSide.none,
+              ),
+            ),
+          ),
+          if (searchResults.isNotEmpty)
+            Container(
+              constraints: const BoxConstraints(maxHeight: 150),
+              margin: const EdgeInsets.only(top: 8),
+              decoration: BoxDecoration(
+                color: Colors.black,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: ListView.builder(
+                shrinkWrap: true,
+                itemCount: searchResults.length,
+                itemBuilder: (_, i) {
+                  final video = searchResults[i];
+                  return ListTile(
+                    dense: true,
+                    leading: Image.network(
+                      video.thumbnails.lowResUrl,
+                      width: 30,
+                      fit: BoxFit.cover,
+                    ),
+                    title: Text(
+                      video.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 12),
+                    ),
+                    onTap: () => _addVideo(video),
+                  );
+                },
+              ),
+            ),
+        ],
+      ),
+    );
+
     return Scaffold(
       body: FloatingEmojis(
         reactionStream: _reactionStreamCtrl.stream,
@@ -448,394 +783,172 @@ class _PartyScreenState extends State<PartyScreen> with WidgetsBindingObserver {
             ),
           ),
           child: SafeArea(
-            child: Column(
-              children: [
-                // ---- Header ----
-                Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                // ---- TABLET / DESKTOP LAYOUT (> 600px) ----
+                if (constraints.maxWidth > 600) {
+                  return Row(
                     children: [
-                      Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
+                      // LEFT COLUMN (Fixed)
+                      Expanded(
+                        flex: 5,
+                        child: Column(
                           children: [
-                              Text(
-                                "PARTY: ${widget.party["id"]}",
-                                style: const TextStyle(
-                                  fontSize: 18,
-                                  fontWeight: FontWeight.bold,
-                                  letterSpacing: 2,
+                            header,
+                            Expanded(
+                              child: Center(
+                                child: Padding(
+                                  padding: const EdgeInsets.all(24),
+                                  child: ConstrainedBox(
+                                    constraints: const BoxConstraints(maxWidth: 500),
+                                    child: Column(
+                                      mainAxisAlignment: MainAxisAlignment.center,
+                                      children: [
+                                        player,
+                                        const SizedBox(height: 12),
+                                        reactions,
+                                        const SizedBox(height: 12),
+                                        controls,
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      // DIVIDER
+                      Container(width: 1, color: Colors.white10),
+                      // RIGHT COLUMN (Scrollable Queue + Search)
+                      Expanded(
+                        flex: 4,
+                        child: Column(
+                          children: [
+                            const Padding(
+                              padding: EdgeInsets.all(16.0),
+                              child: Text(
+                                "QUEUE",
+                                style: TextStyle(
                                   color: Colors.white,
+                                  fontWeight: FontWeight.bold,
+                                  letterSpacing: 1.2,
                                 ),
                               ),
-                              Row(
-                                children: [
-                                  IconButton(
-                                    icon: const Icon(Icons.share, size: 20, color: Colors.white70),
-                                    constraints: const BoxConstraints(),
-                                    padding: const EdgeInsets.only(right: 8),
-                                    onPressed: _shareParty,
-                                  ),
-                                  if (isHost)
-                                    Padding(
-                                      padding: const EdgeInsets.only(right: 8.0),
-                                      child: IconButton(
-                                        icon: const Icon(Icons.qr_code, size: 20, color: Colors.white70),
-                                        constraints: const BoxConstraints(),
-                                        padding: EdgeInsets.zero,
-                                        onPressed: _showQRCode,
+                            ),
+                            Expanded(
+                              child: ListView.builder(
+                                padding: const EdgeInsets.symmetric(horizontal: 16),
+                                itemCount: queue.length,
+                                itemBuilder: (context, i) {
+                                  final track = queue[i];
+                                  final isCurrent = i == currentIndex;
+                                  return Padding(
+                                    padding: const EdgeInsets.only(bottom: 8),
+                                    child: GlassCard(
+                                      opacity: isCurrent ? 0.1 : 0.05,
+                                      borderRadius: BorderRadius.circular(12),
+                                      child: ListTile(
+                                        dense: true,
+                                        contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+                                        leading: isCurrent
+                                            ? Icon(Icons.equalizer_rounded, color: Theme.of(context).primaryColor, size: 20)
+                                            : Text("${i + 1}", style: const TextStyle(color: Colors.white54)),
+                                        title: Text(track["title"], maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: isCurrent ? Colors.white : Colors.white70)),
+                                        subtitle: Text("By ${track["addedBy"] ?? 'Unknown'}", style: const TextStyle(color: Colors.white38, fontSize: 10)),
+                                        trailing: isHost
+                                            ? IconButton(icon: const Icon(Icons.delete_outline, color: Colors.white54, size: 20), onPressed: () => _removeTrack(track["id"]))
+                                            : null,
+                                        onTap: isHost ? () => _changeTrack(i) : null,
                                       ),
                                     ),
-                                ],
+                                  );
+                                },
                               ),
-                              const SizedBox(height: 4),
-                              Row(
-                                  children: [
-                                      const Icon(Icons.people, size: 14, color: Colors.white70),
-                                      const SizedBox(width: 4),
-                                      Text(
-                                          "$partySize Online",
-                                          style: const TextStyle(color: Colors.white70, fontSize: 12),
-                                      ),
-                                  ],
-                              ),
+                            ),
+                            searchBar,
                           ],
-                      ),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 6,
-                        ),
-                        decoration: BoxDecoration(
-                          color: isHost
-                              ? const Color(0xFFBB86FC)
-                              : const Color(0xFF03DAC6),
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        child: Text(
-                          isHost ? "HOST" : "GUEST",
-                          style: const TextStyle(
-                            color: Colors.black,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 10,
-                          ),
                         ),
                       ),
                     ],
-                  ),
-                ),
+                  );
+                }
 
-                // ---- Player Area ----
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  child: AspectRatio(
-                    aspectRatio: 16 / 9,
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(16),
-                      child: Container(
-                        color: Colors.black,
-                        child: showPlayer
-                            ? (_controller == null
-                                ? Center(
+                // ---- MOBILE LAYOUT (< 600px) ----
+                return Column(
+                  children: [
+                    Expanded(
+                      child: CustomScrollView(
+                        slivers: [
+                          SliverToBoxAdapter(
+                            child: Column(
+                              children: [
+                                header,
+                                Padding(
+                                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                                  child: player,
+                                ),
+                                const SizedBox(height: 24),
+                                reactions,
+                                const SizedBox(height: 24),
+                                controls,
+                                const SizedBox(height: 24),
+                                const Padding(
+                                  padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                                  child: Align(
+                                    alignment: Alignment.centerLeft,
                                     child: Text(
-                                      _isPlaying ? "Loading..." : "Waiting...",
-                                      style: const TextStyle(color: Colors.white54),
-                                    ),
-                                  )
-                                : YoutubePlayer(
-                                    controller: _controller!,
-                                    showVideoProgressIndicator: true,
-                                    progressIndicatorColor: Theme.of(
-                                      context,
-                                    ).primaryColor,
-                                    onEnded: (_) {
-                                      if (isHost && _lastEndedIndex != currentIndex) {
-                                        _lastEndedIndex = currentIndex;
-                                        widget.socket.emit("TRACK_ENDED", {
-                                          "partyId": widget.party["id"],
-                                        });
-                                      }
-                                    },
-                                    onReady: () {
-                                      if (_serverStartedAt != null && _isPlaying) {
-                                        final now =
-                                            DateTime.now().millisecondsSinceEpoch;
-                                        final seekMs = now - _serverStartedAt!;
-                                        _controller!.seekTo(
-                                          Duration(milliseconds: seekMs),
-                                        );
-                                        _controller!.play();
-                                      }
-                                    },
-                                  ))
-                            : Center(
-                                child: Column(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    Icon(
-                                      Icons.queue_music,
-                                      size: 48,
-                                      color: Colors.white24,
-                                    ),
-                                    const SizedBox(height: 16),
-                                    Text(
-                                      isEndOfQueue 
-                                          ? "End of Queue" 
-                                          : "Queue is Empty",
-                                      style: const TextStyle(
-                                          color: Colors.white54,
-                                          fontSize: 18,
+                                      "QUEUE",
+                                      style: TextStyle(
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.bold,
+                                        letterSpacing: 1.2,
                                       ),
                                     ),
-                                    const SizedBox(height: 8),
-                                    Text(
-                                      "Add songs to continue the party!",
-                                      style: const TextStyle(color: Colors.white38),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          SliverList(
+                            delegate: SliverChildBuilderDelegate(
+                              (context, i) {
+                                final track = queue[i];
+                                final isCurrent = i == currentIndex;
+                                return Padding(
+                                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                                  child: GlassCard(
+                                    opacity: isCurrent ? 0.1 : 0.05,
+                                    borderRadius: BorderRadius.circular(12),
+                                    child: ListTile(
+                                      dense: true,
+                                      contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+                                      leading: isCurrent
+                                          ? Icon(Icons.equalizer_rounded, color: Theme.of(context).primaryColor, size: 20)
+                                          : Text("${i + 1}", style: const TextStyle(color: Colors.white54)),
+                                      title: Text(track["title"], maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: isCurrent ? Colors.white : Colors.white70)),
+                                      subtitle: Text("By ${track["addedBy"] ?? 'Unknown'}", style: const TextStyle(color: Colors.white38, fontSize: 10)),
+                                      trailing: isHost
+                                          ? IconButton(icon: const Icon(Icons.delete_outline, color: Colors.white54, size: 20), onPressed: () => _removeTrack(track["id"]))
+                                          : null,
+                                      onTap: isHost ? () => _changeTrack(i) : null,
                                     ),
-                                  ],
-                                ),
-                            ),
-                      ),
-                    ),
-                  ),
-                ),
-
-                const SizedBox(height: 24),
-
-                // ---- Reactions Toolbar ----
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                    children: ["🔥", "❤️", "🎉", "😂", "👋", "💃"].map((emoji) {
-                      return GestureDetector(
-                        onTap: () => _sendReaction(emoji),
-                        child: Container(
-                          padding: const EdgeInsets.all(8),
-                          decoration: BoxDecoration(
-                            color: Colors.white10,
-                            shape: BoxShape.circle,
-                          ),
-                          child: Text(
-                            emoji,
-                            style: const TextStyle(fontSize: 24),
-                          ),
-                        ),
-                      );
-                    }).toList(),
-                  ),
-                ),
-
-                const SizedBox(height: 24),
-
-                // ---- Vote to Skip (Guests Only) ----
-                if (!isHost)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
-                    child: SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton.icon(
-                        icon: const Icon(Icons.thumbs_up_down_outlined),
-                        label: Text(
-                          partySize < 5 
-                            ? "Vote Skip (Need 5+ Users)" 
-                            : "Vote to Skip ($votesCount/$votesRequired)",
-                        ),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: partySize < 5 ? Colors.grey : Colors.amber,
-                          foregroundColor: Colors.black,
-                        ),
-                        onPressed: partySize >= 5 ? _voteSkip : null,
-                      ),
-                    ),
-                  ),
-
-                // ---- Host Controls ----
-                if (isHost)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 24),
-                    child: Column(
-                      children: [
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                          children: [
-                            IconButton(
-                              iconSize: 42,
-                              icon: const Icon(Icons.skip_previous),
-                              color: Colors.white,
-                              onPressed: currentIndex > 0 ? _prevTrack : null,
-                            ),
-                            IconButton(
-                              iconSize: 56,
-                              icon: Icon(
-                                _isPlaying
-                                    ? Icons.pause_circle_filled
-                                    : Icons.play_circle_fill,
-                              ),
-                              color: Theme.of(context).primaryColor,
-                              onPressed: _isPlaying ? _pause : _resyncPlay,
-                            ),
-                            IconButton(
-                              iconSize: 42,
-                              icon: const Icon(Icons.skip_next),
-                              color: Colors.white,
-                              onPressed:
-                                  currentIndex < queue.length - 1
-                                      ? _nextTrack
-                                      : null,
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 12),
-                        SizedBox(
-                          width: double.infinity,
-                          child: ElevatedButton.icon(
-                            icon: const Icon(Icons.stop_circle),
-                            label: const Text("END PARTY"),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.red,
-                              foregroundColor: Colors.white,
-                            ),
-                            onPressed: _endParty,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-
-                const SizedBox(height: 24),
-
-                // ---- Queue List ----
-                Expanded(
-                  child: ListView.builder(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    itemCount: queue.length,
-                    itemBuilder: (_, i) {
-                      final track = queue[i];
-                      final isCurrent = i == currentIndex;
-                      return Padding(
-                        padding: const EdgeInsets.only(bottom: 8),
-                        child: GlassCard(
-                          opacity: isCurrent ? 0.1 : 0.05,
-                          borderRadius: BorderRadius.circular(12),
-                          child: ListTile(
-                            dense: true,
-                            contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 0,
-                            ),
-                            leading: isCurrent
-                                ? Icon(
-                                    Icons.equalizer_rounded,
-                                    color: Theme.of(context).primaryColor,
-                                    size: 20,
-                                  )
-                                : Text(
-                                    "${i + 1}",
-                                    style: const TextStyle(color: Colors.white54),
                                   ),
-                            title: Text(
-                              track["title"],
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                color: isCurrent ? Colors.white : Colors.white70,
-                                fontWeight: isCurrent
-                                    ? FontWeight.bold
-                                    : FontWeight.normal,
-                                fontSize: 14,
-                              ),
+                                );
+                              },
+                              childCount: queue.length,
                             ),
-                            subtitle: Text(
-                              "By ${track["addedBy"] ?? 'Unknown'}",
-                              style: const TextStyle(
-                                color: Colors.white38,
-                                fontSize: 10,
-                              ),
-                            ),
-                            trailing: isHost
-                                ? IconButton(
-                                    icon: const Icon(Icons.delete_outline,
-                                        color: Colors.white54, size: 20),
-                                    onPressed: () => _removeTrack(track["id"]),
-                                  )
-                                : null,
-                            onTap: isHost ? () => _changeTrack(i) : null,
                           ),
-                        ),
-                      );
-                    },
-                  ),
-                ),
-
-                // ---- Search / Add ----
-                Container(
-                  padding: const EdgeInsets.all(16),
-                  color: const Color(0xFF1E1E1E),
-                  child: Column(
-                    children: [
-                      TextField(
-                        controller: searchCtrl,
-                        onChanged: _onSearchChanged,
-                        decoration: InputDecoration(
-                          hintText: "Search YouTube songs...",
-                          prefixIcon: const Icon(Icons.search),
-                          suffixIcon: isSearching
-                              ? const SizedBox(
-                                  width: 16,
-                                  height: 16,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                  ),
-                                )
-                              : null,
-                          filled: true,
-                          fillColor: Colors.black,
-                          contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 16,
+                          const SliverToBoxAdapter(
+                            child: SizedBox(height: 100), 
                           ),
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(30),
-                            borderSide: BorderSide.none,
-                          ),
-                        ),
+                        ],
                       ),
-
-                      if (searchResults.isNotEmpty)
-                        Container(
-                          constraints: const BoxConstraints(maxHeight: 150),
-                          margin: const EdgeInsets.only(top: 8),
-                          decoration: BoxDecoration(
-                            color: Colors.black,
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: ListView.builder(
-                            shrinkWrap: true,
-                            itemCount: searchResults.length,
-                            itemBuilder: (_, i) {
-                              final video = searchResults[i];
-                              return ListTile(
-                                dense: true,
-                                leading: Image.network(
-                                  video.thumbnails.lowResUrl,
-                                  width: 30,
-                                  fit: BoxFit.cover,
-                                ),
-                                title: Text(
-                                  video.title,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(fontSize: 12),
-                                ),
-                                onTap: () => _addVideo(video),
-                              );
-                            },
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-              ],
+                    ),
+                    searchBar, 
+                  ],
+                );
+              },
             ),
           ),
         ),

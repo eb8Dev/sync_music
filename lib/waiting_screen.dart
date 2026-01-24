@@ -146,9 +146,11 @@ class _WaitingScreenState extends State<WaitingScreen> {
   }
 
   void _shareParty() {
-    Share.share(
-      "Join my music party on Sync Music! Code: ${widget.party["id"]}",
-      subject: "Join Sync Music Party",
+    SharePlus.instance.share(
+      ShareParams(
+        text: "Join my music party on Sync Music! Code: ${widget.party["id"]}",
+        subject: "Join Sync Music Party",
+      ),
     );
   }
 
