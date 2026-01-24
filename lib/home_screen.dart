@@ -1,5 +1,7 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:socket_io_client/socket_io_client.dart' as IO;
+import 'package:app_links/app_links.dart';
 import 'package:sync_music/waiting_screen.dart';
 import 'package:sync_music/widgets/custom_button.dart';
 import 'package:sync_music/widgets/glass_card.dart';
@@ -9,6 +11,7 @@ import 'package:in_app_update/in_app_update.dart';
 import 'package:sync_music/services/analytics_service.dart';
 import 'package:sync_music/widgets/settings_dialog.dart';
 import 'package:sync_music/services/remote_config_service.dart';
+import 'package:sync_music/explore_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -19,6 +22,9 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   late IO.Socket socket;
+  late AppLinks _appLinks;
+  StreamSubscription<Uri>? _linkSubscription;
+
   final TextEditingController codeCtrl = TextEditingController();
   final TextEditingController nameCtrl = TextEditingController();
   final AnalyticsService _analytics = AnalyticsService();
@@ -38,6 +44,52 @@ class _HomeScreenState extends State<HomeScreen> {
     _checkForUpdate();
     _loadSession();
     _initSocket();
+    _initDeepLinks();
+  }
+
+  Future<void> _initDeepLinks() async {
+    _appLinks = AppLinks();
+
+    // Check initial link
+    final appLink = await _appLinks.getInitialLink();
+    if (appLink != null) {
+      _handleDeepLink(appLink);
+    }
+
+    // Listen for new links
+    _linkSubscription = _appLinks.uriLinkStream.listen((uri) {
+      _handleDeepLink(uri);
+    });
+  }
+
+  void _handleDeepLink(Uri uri) {
+    debugPrint("Deep Link Received: $uri");
+    if (uri.scheme == 'syncmusic') {
+      // Handle "syncmusic://join/CODE" or "syncmusic://CODE"
+      // If host is part of path, e.g. "syncmusic://join/CODE" -> host=join, path segments=[CODE]
+      // If "syncmusic://CODE" -> host=CODE
+      
+      String? code;
+      if (uri.host == 'join' && uri.pathSegments.isNotEmpty) {
+        code = uri.pathSegments.first;
+      } else if (uri.host.isNotEmpty) {
+        code = uri.host;
+      }
+
+      if (code != null && code.isNotEmpty) {
+        setState(() {
+          codeCtrl.text = code!.toUpperCase();
+        });
+        
+        // Auto-join if name is already set
+        if (nameCtrl.text.trim().isNotEmpty) {
+          ScaffoldMessenger.of(context).showSnackBar(
+             SnackBar(content: Text("Auto-joining party: $code")),
+          );
+          _joinParty();
+        }
+      }
+    }
   }
 
   Future<void> _checkForUpdate() async {
@@ -144,7 +196,7 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
-  void _createParty() {
+  void _createParty({String? name, bool isPublic = false}) {
     if (nameCtrl.text.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text("Please enter your name first")),
@@ -152,11 +204,77 @@ class _HomeScreenState extends State<HomeScreen> {
       return;
     }
     setState(() => connecting = true);
-    // Even if server ignores it, we send it for future-proofing or if server is updated
+    
     socket.emit("CREATE_PARTY", {
       "username": nameCtrl.text.trim(),
       "avatar": selectedAvatar,
+      "name": name,
+      "isPublic": isPublic,
     });
+  }
+
+  void _showCreatePartyDialog() {
+    if (nameCtrl.text.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Please enter your name first")),
+      );
+      return;
+    }
+
+    final partyNameCtrl = TextEditingController();
+    bool isPublic = false;
+
+    showDialog(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setState) {
+            return AlertDialog(
+              backgroundColor: const Color(0xFF1E1E1E),
+              title: const Text("Host a Party", style: TextStyle(color: Colors.white)),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    controller: partyNameCtrl,
+                    style: const TextStyle(color: Colors.white),
+                    decoration: const InputDecoration(
+                      labelText: "Party Name (Optional)",
+                      labelStyle: TextStyle(color: Colors.white70),
+                      enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.white38)),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  SwitchListTile(
+                    title: const Text("Public Party", style: TextStyle(color: Colors.white)),
+                    subtitle: const Text("Visible in Explore", style: TextStyle(color: Colors.white54, fontSize: 12)),
+                    value: isPublic,
+                    onChanged: (val) => setState(() => isPublic = val),
+                    activeColor: Theme.of(context).primaryColor,
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text("Cancel"),
+                ),
+                ElevatedButton(
+                  onPressed: () {
+                    Navigator.pop(context);
+                    _createParty(
+                      name: partyNameCtrl.text.trim().isEmpty ? null : partyNameCtrl.text.trim(),
+                      isPublic: isPublic,
+                    );
+                  },
+                  child: const Text("Create"),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
   }
 
   void _joinParty() {
@@ -260,6 +378,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
+    _linkSubscription?.cancel();
     codeCtrl.dispose();
     nameCtrl.dispose();
     socket.dispose();
@@ -352,7 +471,32 @@ class _HomeScreenState extends State<HomeScreen> {
                                   CustomButton(
                                     label: "HOST NEW PARTY",
                                     icon: Icons.add_circle_outline,
-                                    onPressed: _createParty,
+                                    onPressed: _showCreatePartyDialog,
+                                  ),
+                                  const SizedBox(height: 24),
+
+                                  CustomButton(
+                                    label: "EXPLORE PUBLIC PARTIES",
+                                    icon: Icons.explore,
+                                    isPrimary: false,
+                                    onPressed: () {
+                                      if (nameCtrl.text.trim().isEmpty) {
+                                         ScaffoldMessenger.of(context).showSnackBar(
+                                          const SnackBar(content: Text("Please enter your name first")),
+                                        );
+                                        return;
+                                      }
+                                      Navigator.push(
+                                        context,
+                                        MaterialPageRoute(
+                                          builder: (_) => ExploreScreen(
+                                            socket: socket,
+                                            username: nameCtrl.text.trim(),
+                                            avatar: selectedAvatar,
+                                          ),
+                                        ),
+                                      );
+                                    },
                                   ),
                                   const SizedBox(height: 24),
 
