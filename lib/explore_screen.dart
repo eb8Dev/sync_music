@@ -1,77 +1,41 @@
 import 'package:flutter/material.dart';
-import 'package:socket_io_client/socket_io_client.dart' as IO;
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:sync_music/providers/explore_provider.dart';
+import 'package:sync_music/providers/party_provider.dart';
+import 'package:sync_music/providers/user_provider.dart';
 import 'package:sync_music/widgets/glass_card.dart';
 
-class ExploreScreen extends StatefulWidget {
-  final IO.Socket socket;
-  final String username;
-  final String avatar;
-  final String? lastPartyId;
-  final bool isHost;
-
-  const ExploreScreen({
-    super.key,
-    required this.socket,
-    required this.username,
-    required this.avatar,
-    this.lastPartyId,
-    this.isHost = false,
-  });
+class ExploreScreen extends ConsumerWidget {
+  const ExploreScreen({super.key});
 
   @override
-  State<ExploreScreen> createState() => _ExploreScreenState();
-}
+  Widget build(BuildContext context, WidgetRef ref) {
+    final exploreState = ref.watch(exploreProvider);
+    final partyMeta = ref.watch(partyProvider);
+    final userState = ref.watch(userProvider);
 
-class _ExploreScreenState extends State<ExploreScreen> {
-  List<dynamic> publicParties = [];
-  bool isLoading = true;
-
-  @override
-  void initState() {
-    super.initState();
-    _setupSocketListeners();
-    _fetchParties();
-  }
-
-  void _setupSocketListeners() {
-    widget.socket.on("PUBLIC_PARTIES_LIST", (data) {
-      if (!mounted) return;
-      setState(() {
-        publicParties = data;
-        isLoading = false;
-      });
-    });
-  }
-
-  void _fetchParties() {
-    setState(() => isLoading = true);
-    widget.socket.emit("GET_PUBLIC_PARTIES");
-  }
-
-  void _joinParty(String partyId) {
-    if (partyId == widget.lastPartyId && widget.isHost) {
-      widget.socket.emit("RECONNECT_AS_HOST", {
-        "partyId": partyId,
-        "username": widget.username,
-        "avatar": widget.avatar,
-      });
-    } else {
-      widget.socket.emit("JOIN_PARTY", {
-        "partyId": partyId,
-        "username": widget.username,
-        "avatar": widget.avatar,
-      });
+    void fetchParties() {
+      ref.read(exploreProvider.notifier).fetchParties();
     }
-  }
 
-  @override
-  void dispose() {
-    widget.socket.off("PUBLIC_PARTIES_LIST");
-    super.dispose();
-  }
+    void joinParty(String partyId) {
+      if (partyId == partyMeta.lastPartyId && partyMeta.isHost) {
+        ref.read(partyProvider.notifier).reconnectAsHost(
+          partyId: partyId,
+          username: userState.username,
+          avatar: userState.avatar,
+        );
+      } else {
+        ref.read(partyProvider.notifier).joinParty(
+          partyId: partyId,
+          username: userState.username,
+          avatar: userState.avatar,
+        );
+      }
+      // After joining, we usually navigate away. HomeScreen refactor handles navigation based on partyProvider state.
+      Navigator.pop(context); 
+    }
 
-  @override
-  Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: const Text("EXPLORE PARTIES"),
@@ -81,7 +45,7 @@ class _ExploreScreenState extends State<ExploreScreen> {
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),
-            onPressed: _fetchParties,
+            onPressed: fetchParties,
           ),
         ],
       ),
@@ -99,9 +63,9 @@ class _ExploreScreenState extends State<ExploreScreen> {
           ),
         ),
         child: SafeArea(
-          child: isLoading
+          child: exploreState.isLoading
               ? const Center(child: CircularProgressIndicator())
-              : publicParties.isEmpty
+              : exploreState.publicParties.isEmpty
                   ? Center(
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
@@ -120,7 +84,7 @@ class _ExploreScreenState extends State<ExploreScreen> {
                             ),
                           ),
                           TextButton(
-                            onPressed: _fetchParties,
+                            onPressed: fetchParties,
                             child: const Text("Refresh"),
                           ),
                         ],
@@ -128,13 +92,13 @@ class _ExploreScreenState extends State<ExploreScreen> {
                     )
                   : ListView.builder(
                       padding: const EdgeInsets.all(16),
-                      itemCount: publicParties.length,
+                      itemCount: exploreState.publicParties.length,
                       itemBuilder: (context, index) {
-                        final party = publicParties[index];
+                        final party = exploreState.publicParties[index];
                         return Padding(
                           padding: const EdgeInsets.only(bottom: 12),
                           child: GlassCard(
-                            onTap: () => _joinParty(party['id']),
+                            onTap: () => joinParty(party['id']),
                             child: Padding(
                               padding: const EdgeInsets.all(16),
                               child: Row(

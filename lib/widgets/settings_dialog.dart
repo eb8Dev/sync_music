@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:sync_music/services/support_service.dart';
+import 'package:sync_music/support_screen.dart'; // Import SupportScreen
 import 'package:sync_music/widgets/glass_card.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -42,7 +43,10 @@ class SettingsDialog extends StatelessWidget {
                 subtitle: "Report bugs or request features",
                 onTap: () {
                   Navigator.pop(context);
-                  supportService.contactSupport();
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const SupportScreen()),
+                  );
                 },
               ),
               const SizedBox(height: 16),

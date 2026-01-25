@@ -1,9 +1,12 @@
 import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:socket_io_client/socket_io_client.dart' as IO;
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:sync_music/party_screen.dart';
+import 'package:sync_music/providers/party_provider.dart';
+import 'package:sync_music/providers/party_state_provider.dart';
+import 'package:sync_music/providers/user_provider.dart';
+import 'package:sync_music/services/remote_config_service.dart';
 import 'package:sync_music/services/youtube_service.dart';
 import 'package:sync_music/widgets/glass_card.dart';
 import 'package:youtube_explode_dart/youtube_explode_dart.dart';
@@ -11,105 +14,33 @@ import 'package:qr_flutter/qr_flutter.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 import 'package:share_plus/share_plus.dart';
 
-class WaitingScreen extends StatefulWidget {
-  final IO.Socket socket;
+class WaitingScreen extends ConsumerStatefulWidget {
   final Map<String, dynamic> party;
   final String username;
 
-  const WaitingScreen({
-    super.key,
-    required this.socket,
-    required this.party,
-    required this.username,
-  });
+  const WaitingScreen({super.key, required this.party, required this.username});
 
   @override
-  State<WaitingScreen> createState() => _WaitingScreenState();
+  ConsumerState<WaitingScreen> createState() => _WaitingScreenState();
 }
 
-class _WaitingScreenState extends State<WaitingScreen> {
+class _WaitingScreenState extends ConsumerState<WaitingScreen> {
   final YouTubeService _ytService = YouTubeService();
   final TextEditingController searchCtrl = TextEditingController();
 
-  List<dynamic> queue = [];
   List<Video> searchResults = [];
-  List<String> logs = [];
   bool isSearching = false;
   Timer? _debounce;
-
-  // Listeners
-  late dynamic _queueListener;
-  late dynamic _playbackListener;
-  late dynamic _errorListener;
-  late dynamic _infoListener;
 
   @override
   void initState() {
     super.initState();
     WakelockPlus.enable();
-    queue = List.from(widget.party["queue"] ?? []);
 
-    // ---- Define Listeners ----
-    _queueListener = (data) {
-      if (!mounted) return;
-      setState(() {
-        queue = List.from(data);
-      });
-    };
-
-    _playbackListener = (data) {
-      if (!mounted) return;
-      // Transition to PartyScreen
-      final updatedParty = {
-        ...widget.party,
-        "queue": queue,
-        "currentIndex": data["currentIndex"],
-        "startedAt": data["startedAt"],
-        "isPlaying": data["isPlaying"],
-        "isHost": widget.party["isHost"],
-      };
-
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(
-          builder: (_) => PartyScreen(
-            socket: widget.socket,
-            party: updatedParty,
-            username: widget.username,
-          ),
-        ),
-      );
-    };
-
-    _errorListener = (msg) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(msg.toString())));
-      Navigator.popUntil(context, (route) => route.isFirst);
-    };
-
-    _infoListener = (msg) {
-      if (!mounted) return;
-      setState(() {
-        logs.add(msg.toString());
-      });
-      // Scroll to bottom if needed, but for small list it's fine
-    };
-
-    // ---- Attach Listeners ----
-    widget.socket.on("QUEUE_UPDATED", _queueListener);
-    widget.socket.on("PLAYBACK_UPDATE", _playbackListener);
-    widget.socket.on("ERROR", _errorListener);
-    widget.socket.on("INFO", _infoListener);
-
-    // Initial check
-    if (widget.party["isPlaying"] == true) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        // Manually trigger nav if already playing
-        _playbackListener(widget.party);
-      });
-    }
+    // Initialize the party state provider with initial data
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      ref.read(partyStateProvider.notifier).init(widget.party);
+    });
   }
 
   void _showQRCode() {
@@ -146,10 +77,11 @@ class _WaitingScreenState extends State<WaitingScreen> {
   }
 
   void _shareParty() {
+    final serverUrl = RemoteConfigService().getServerUrl();
+    final link = "$serverUrl/join/${widget.party["id"]}";
     SharePlus.instance.share(
       ShareParams(
-        text:
-            "Join my music party on Sync Music! Click here: syncmusic://join/${widget.party["id"]}",
+        text: "Join my music party on Sync Music! Click here: $link",
         subject: "Join Sync Music Party",
       ),
     );
@@ -158,17 +90,12 @@ class _WaitingScreenState extends State<WaitingScreen> {
   @override
   void dispose() {
     WakelockPlus.disable();
-    widget.socket.off("QUEUE_UPDATED", _queueListener);
-    widget.socket.off("PLAYBACK_UPDATE", _playbackListener);
-    widget.socket.off("ERROR", _errorListener);
-    widget.socket.off("INFO", _infoListener);
     _ytService.dispose();
     searchCtrl.dispose();
     _debounce?.cancel();
     super.dispose();
   }
 
-  // ---- Search & Add ----
   void _onSearchChanged(String query) {
     if (_debounce?.isActive ?? false) _debounce!.cancel();
 
@@ -193,22 +120,27 @@ class _WaitingScreenState extends State<WaitingScreen> {
   }
 
   void _addVideo(Video video) {
-    widget.socket.emit("ADD_TRACK", {
-      "partyId": widget.party["id"],
-      "track": {
-        "url": video.url,
-        "title": video.title,
-        "addedBy": widget.username,
-      },
+    ref.read(partyStateProvider.notifier).addTrack(widget.party["id"], {
+      "url": video.url,
+      "title": video.title,
+      "addedBy": widget.username,
     });
     searchCtrl.clear();
     setState(() => searchResults = []);
     FocusScope.of(context).unfocus();
+    
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text("Added '${video.title}' to queue"),
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: Colors.green,
+        duration: const Duration(seconds: 2),
+      ),
+    );
   }
 
-  // ---- Start Party ----
   void _startParty() {
-    widget.socket.emit("PLAY", {"partyId": widget.party["id"]});
+    ref.read(partyStateProvider.notifier).play(widget.party["id"]);
   }
 
   void _copyCode() {
@@ -220,7 +152,24 @@ class _WaitingScreenState extends State<WaitingScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final bool isHost = widget.party["isHost"] == true;
+    final partyState = ref.watch(partyStateProvider);
+    final bool isHost = ref.watch(partyProvider).isHost;
+
+    // Listen for playback start to navigate to PartyScreen
+    ref.listen(partyStateProvider, (previous, next) {
+      if (next.isPlaying && (previous == null || !previous.isPlaying)) {
+        final userState = ref.read(userProvider);
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (_) => PartyScreen(
+              party: widget.party,
+              username: "${userState.avatar} ${userState.username}",
+            ),
+          ),
+        );
+      }
+    });
 
     return Scaffold(
       appBar: AppBar(
@@ -262,8 +211,6 @@ class _WaitingScreenState extends State<WaitingScreen> {
         child: Column(
           children: [
             const SizedBox(height: 16),
-
-            // ---- Status ----
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 24),
               child: GlassCard(
@@ -278,7 +225,7 @@ class _WaitingScreenState extends State<WaitingScreen> {
                       ),
                       const SizedBox(width: 16),
                       Text(
-                        isHost ? "YOU ARE HOST" : "WAITING FOR HOST",
+                        isHost ? "YOU ARE HOST" : "WAITING FOR HOST TO START",
                         style: const TextStyle(
                           fontWeight: FontWeight.bold,
                           letterSpacing: 1.2,
@@ -290,7 +237,8 @@ class _WaitingScreenState extends State<WaitingScreen> {
               ),
             ),
 
-            if (logs.isNotEmpty)
+            // Simplified logs for now, using the messages from provider if they are system type
+            if (partyState.messages.any((m) => m['type'] == 'system'))
               Container(
                 height: 100,
                 margin: const EdgeInsets.symmetric(
@@ -302,21 +250,28 @@ class _WaitingScreenState extends State<WaitingScreen> {
                   color: Colors.black12,
                   borderRadius: BorderRadius.circular(8),
                 ),
-                child: ListView.builder(
-                  reverse: true, // Newest at bottom
-                  itemCount: logs.length,
-                  itemBuilder: (_, i) => Text(
-                    logs[logs.length - 1 - i],
-                    style: const TextStyle(color: Colors.white54, fontSize: 12),
-                  ),
+                child: ListView(
+                  reverse: true,
+                  children: partyState.messages
+                      .where((m) => m['type'] == 'system')
+                      .toList()
+                      .reversed
+                      .map(
+                        (m) => Text(
+                          m['text'] ?? "",
+                          style: const TextStyle(
+                            color: Colors.white54,
+                            fontSize: 12,
+                          ),
+                        ),
+                      )
+                      .toList(),
                 ),
               ),
 
             const SizedBox(height: 12),
-
-            // ---- Queue ----
             Expanded(
-              child: queue.isEmpty
+              child: partyState.queue.isEmpty
                   ? Center(
                       child: Text(
                         "Queue is empty",
@@ -325,9 +280,9 @@ class _WaitingScreenState extends State<WaitingScreen> {
                     )
                   : ListView.builder(
                       padding: const EdgeInsets.symmetric(horizontal: 24),
-                      itemCount: queue.length,
+                      itemCount: partyState.queue.length,
                       itemBuilder: (_, i) {
-                        final track = queue[i];
+                        final track = partyState.queue[i];
                         return Padding(
                           padding: const EdgeInsets.only(bottom: 8),
                           child: GlassCard(
@@ -357,8 +312,6 @@ class _WaitingScreenState extends State<WaitingScreen> {
                       },
                     ),
             ),
-
-            // ---- Search Bar ----
             Container(
               padding: const EdgeInsets.all(16),
               color: const Color(0xFF121212),
@@ -384,8 +337,6 @@ class _WaitingScreenState extends State<WaitingScreen> {
                           : null,
                     ),
                   ),
-
-                  // Search Results List
                   if (searchResults.isNotEmpty)
                     Container(
                       constraints: const BoxConstraints(maxHeight: 200),
@@ -418,7 +369,6 @@ class _WaitingScreenState extends State<WaitingScreen> {
                         },
                       ),
                     ),
-
                   if (isHost) ...[
                     const SizedBox(height: 16),
                     SizedBox(

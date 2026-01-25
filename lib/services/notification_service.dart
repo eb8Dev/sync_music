@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 // Top-level function for background messages
 @pragma('vm:entry-point')
@@ -131,5 +132,50 @@ class NotificationService {
   
   Future<String?> getToken() async {
       return await _firebaseMessaging.getToken();
+  }
+
+  // ---- ONE-TIME LOCAL NOTIFICATIONS ----
+
+  Future<void> showWelcomeNotificationIfFirstTime() async {
+    final prefs = await SharedPreferences.getInstance();
+    final bool alreadySent = prefs.getBool('notif_welcome_sent') ?? false;
+    if (alreadySent) return;
+
+    await _showLocalNotificationManual(
+      title: "Welcome to Sync Music! 🎵",
+      body: "Ready to party? Host a session or join friends to listen in sync!",
+    );
+
+    await prefs.setBool('notif_welcome_sent', true);
+  }
+
+  Future<void> showFirstPartyNotificationIfFirstTime() async {
+    final prefs = await SharedPreferences.getInstance();
+    final bool alreadySent = prefs.getBool('notif_first_party_sent') ?? false;
+    if (alreadySent) return;
+
+    await _showLocalNotificationManual(
+      title: "You're in! 🎉",
+      body: "This is your first party. Add songs to the queue and vote to skip!",
+    );
+
+    await prefs.setBool('notif_first_party_sent', true);
+  }
+
+  Future<void> _showLocalNotificationManual({required String title, required String body}) async {
+    const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
+      'high_importance_channel',
+      'High Importance Notifications',
+      importance: Importance.max,
+      priority: Priority.high,
+    );
+    const NotificationDetails platformDetails = NotificationDetails(android: androidDetails);
+
+    await _localNotifications.show(
+      0, // ID
+      title,
+      body,
+      platformDetails,
+    );
   }
 }

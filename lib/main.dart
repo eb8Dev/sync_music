@@ -1,6 +1,7 @@
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_crashlytics/firebase_crashlytics.dart';
@@ -42,7 +43,11 @@ void main() async {
 
   final prefs = await SharedPreferences.getInstance();
   final bool onboardingSeen = prefs.getBool('onboarding_seen') ?? false;
-  runApp(PartyApp(showOnboarding: !onboardingSeen));
+  runApp(
+    ProviderScope(
+      child: PartyApp(showOnboarding: !onboardingSeen),
+    ),
+  );
 }
 
 // ---------------- APP ROOT ----------------
@@ -60,3 +65,6 @@ class PartyApp extends StatelessWidget {
     );
   }
 }
+
+// flutter build apk --target-platform android-arm64 --split-per-ab
+// flutter build appbundle --release

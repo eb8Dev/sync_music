@@ -1,6 +1,10 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:socket_io_client/socket_io_client.dart' as IO;
+import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:sync_music/providers/party_provider.dart';
+import 'package:sync_music/providers/party_state_provider.dart';
+import 'package:sync_music/providers/socket_provider.dart';
 import 'package:youtube_player_flutter/youtube_player_flutter.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:sync_music/widgets/glass_card.dart';
@@ -11,23 +15,17 @@ import 'package:youtube_explode_dart/youtube_explode_dart.dart' as yt;
 import 'package:wakelock_plus/wakelock_plus.dart';
 import 'package:share_plus/share_plus.dart';
 
-class PartyScreen extends StatefulWidget {
-  final IO.Socket socket;
+class PartyScreen extends ConsumerStatefulWidget {
   final Map<String, dynamic> party;
   final String username;
 
-  const PartyScreen({
-    super.key,
-    required this.socket,
-    required this.party,
-    required this.username,
-  });
+  const PartyScreen({super.key, required this.party, required this.username});
 
   @override
-  State<PartyScreen> createState() => _PartyScreenState();
+  ConsumerState<PartyScreen> createState() => _PartyScreenState();
 }
 
-class _PartyScreenState extends State<PartyScreen>
+class _PartyScreenState extends ConsumerState<PartyScreen>
     with WidgetsBindingObserver, SingleTickerProviderStateMixin {
   final YouTubeService _ytService = YouTubeService();
   final TextEditingController searchCtrl = TextEditingController();
@@ -37,24 +35,9 @@ class _PartyScreenState extends State<PartyScreen>
   bool isSearching = false;
 
   YoutubePlayerController? _controller;
-
-  List<dynamic> queue = [];
-  List<Map<String, dynamic>> messages = [];
-  List<Map<String, dynamic>> membersList = [];
-  int currentIndex = 0;
-  int? _serverStartedAt;
-  int? _lastEndedIndex;
-
-  bool isHost = false;
-  bool _isPlaying = false;
-  bool isDisconnected = false;
-  int partySize = 1;
-  int votesCount = 0;
-  int votesRequired = 0;
-
   late TabController _tabController;
   int _unreadMessages = 0;
-  int _currentThemeIndex = 0;
+  int? _lastEndedIndex;
 
   static const List<LinearGradient> _themes = [
     LinearGradient(
@@ -87,21 +70,6 @@ class _PartyScreenState extends State<PartyScreen>
   final StreamController<String> _reactionStreamCtrl =
       StreamController<String>.broadcast();
 
-  // Listeners
-  late dynamic _playbackListener;
-  late dynamic _queueListener;
-  late dynamic _syncListener;
-  late dynamic _errorListener;
-  late dynamic _partySizeListener;
-  late dynamic _voteUpdateListener;
-  late dynamic _reactionListener;
-  late dynamic _chatListener;
-  late dynamic _infoListener;
-  late dynamic _membersListener;
-  late dynamic _kickedListener;
-  late dynamic _partyStateListener;
-  late dynamic _themeListener;
-
   void _handlePlayerError(String error) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -111,13 +79,24 @@ class _PartyScreenState extends State<PartyScreen>
       ),
     );
 
+    final isHost = ref.read(partyProvider).isHost;
     if (isHost) {
       Future.delayed(const Duration(seconds: 3), () {
         if (mounted && isHost) {
-          widget.socket.emit("TRACK_ENDED", {"partyId": widget.party["id"]});
+          ref.read(partyStateProvider.notifier).endTrack(widget.party["id"]);
+          // Wait, I need to add endTrack to notifier or emit directly.
+          // Let's emit directly for this specific case if I didn't add it.
+          // Or add it to notifier.
         }
       });
     }
+  }
+
+  void _copyCode() {
+    Clipboard.setData(ClipboardData(text: widget.party["id"]));
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text("Party Code Copied!")));
   }
 
   @override
@@ -133,117 +112,29 @@ class _PartyScreenState extends State<PartyScreen>
       }
     });
 
-    queue = List.from(widget.party["queue"] ?? []);
-    currentIndex = widget.party["currentIndex"] ?? 0;
-    isHost = widget.party["hostId"] == widget.socket.id;
-    _isPlaying = widget.party["isPlaying"] == true;
-    partySize = widget.party["size"] ?? 1;
-    _currentThemeIndex = widget.party["themeIndex"] ?? 0;
-
-    debugPrint("Initial Party Data Members: ${widget.party["members"]}");
-    if (widget.party["members"] != null) {
-      try {
-        membersList = List<Map<String, dynamic>>.from(widget.party["members"]);
-      } catch (e) {
-        debugPrint("Error parsing initial members list: $e");
-      }
+    final partyState = ref.read(partyStateProvider);
+    if (partyState.isPlaying &&
+        partyState.queue.isNotEmpty &&
+        partyState.currentIndex < partyState.queue.length) {
+      _initPlayer(partyState);
     }
 
-    if (_isPlaying && queue.isNotEmpty && currentIndex < queue.length) {
-      _serverStartedAt = (widget.party["startedAt"] as num?)?.toInt();
-      final videoId = YoutubePlayer.convertUrlToId(queue[currentIndex]["url"]);
-
-      if (videoId != null) {
-        _controller = YoutubePlayerController(
-          initialVideoId: videoId,
-          flags: const YoutubePlayerFlags(
-            autoPlay: false,
-            mute: false,
-            hideControls: true,
-            disableDragSeek: true,
-          ),
-        );
-        // ignore: cascade_invocations
-        _controller!.addListener(() {
-          if (_controller!.value.hasError) {
-            _handlePlayerError(_controller!.value.errorCode.toString());
-          }
-        });
+    // Listen for reactions directly from socket since it's a stream-like event
+    ref.read(socketProvider).on("REACTION", (data) {
+      if (mounted) {
+        _reactionStreamCtrl.add(data["emoji"] ?? "❤️");
       }
-    }
+    });
 
-    // ---- Define Listeners ----
-    _playbackListener = (data) => _onPlaybackUpdate(data);
-    _queueListener = (data) {
+    ref.read(socketProvider).on("PARTY_ENDED", (data) {
       if (!mounted) return;
-      final newQueue = List.from(data);
-
-      // Check for added songs
-      if (newQueue.length > queue.length) {
-        final newTrack = newQueue.last;
-        _addSystemMessage(
-          "${newTrack['addedBy'] ?? 'Someone'} added '${newTrack['title']}'",
-        );
-      }
-
-      setState(() {
-        queue = newQueue;
-      });
-    };
-    _syncListener = (data) => _onSync(data);
-    _errorListener = (msg) {
-      if (!mounted) return;
-      final message = msg.toString();
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(SnackBar(content: Text(message)));
+      ).showSnackBar(SnackBar(content: Text(data["message"] ?? "Party ended")));
+      Navigator.of(context).popUntil((route) => route.isFirst);
+    });
 
-      if (message.contains("Party not found")) {
-        Navigator.of(context).popUntil((route) => route.isFirst);
-      }
-    };
-    _partySizeListener = (data) {
-      if (!mounted) return;
-      setState(() {
-        partySize = data["size"] ?? 1;
-      });
-    };
-    _voteUpdateListener = (data) {
-      if (!mounted) return;
-      setState(() {
-        votesCount = data["votes"] ?? 0;
-        votesRequired = data["required"] ?? 0;
-      });
-    };
-    _reactionListener = (data) {
-      if (!mounted) return;
-      _reactionStreamCtrl.add(data["emoji"] ?? "❤️");
-    };
-    _chatListener = (data) {
-      if (!mounted) return;
-      setState(() {
-        messages.add({...Map<String, dynamic>.from(data), 'type': 'user'});
-        if (_tabController.index != 1) {
-          _unreadMessages++;
-        }
-      });
-    };
-    _infoListener = (msg) {
-      if (!mounted) return;
-      _addSystemMessage(msg.toString());
-    };
-    _membersListener = (data) {
-      debugPrint("MEMBERS_LIST received: $data");
-      if (!mounted) return;
-      try {
-        setState(() {
-          membersList = List<Map<String, dynamic>>.from(data);
-        });
-      } catch (e) {
-        debugPrint("Error parsing members list: $e");
-      }
-    };
-    _kickedListener = (msg) {
+    ref.read(socketProvider).on("KICKED", (msg) {
       if (!mounted) return;
       showDialog(
         barrierDismissible: false,
@@ -261,241 +152,92 @@ class _PartyScreenState extends State<PartyScreen>
           ],
         ),
       );
-    };
-
-    // Handle reconnection state update
-    _partyStateListener = (data) {
-      if (!mounted) return;
-      debugPrint("PartyScreen: Received PARTY_STATE update (Reconnection)");
-
-      setState(() {
-        // Update basic properties
-        isHost = data["isHost"] == true;
-        partySize = data["size"] ?? partySize;
-        queue = List.from(data["queue"] ?? []);
-        _currentThemeIndex = data["themeIndex"] ?? _currentThemeIndex;
-
-        // Handle playback state if changed
-        final newIndex = data["currentIndex"] ?? 0;
-        final newIsPlaying = data["isPlaying"] == true;
-        final newStartedAt = data["startedAt"];
-
-        // If something fundamental changed, trigger playback update logic
-        if (newIndex != currentIndex || newIsPlaying != _isPlaying) {
-          _onPlaybackUpdate({
-            "isPlaying": newIsPlaying,
-            "currentIndex": newIndex,
-            "startedAt": newStartedAt,
-          });
-        }
-      });
-
-      if (isHost) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text("Reconnected as Host!")));
-      } else {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text("Reconnected to Party!")));
-      }
-    };
-
-    _themeListener = (data) {
-      if (!mounted) return;
-      setState(() {
-        _currentThemeIndex = data["themeIndex"] ?? 0;
-      });
-    };
-
-    // ---- Attach Listeners ----
-    widget.socket.on("PLAYBACK_UPDATE", _playbackListener);
-    widget.socket.on("QUEUE_UPDATED", _queueListener);
-    widget.socket.on("SYNC", _syncListener);
-    widget.socket.on("ERROR", _errorListener);
-    widget.socket.on("PARTY_SIZE", _partySizeListener);
-    widget.socket.on("VOTE_UPDATE", _voteUpdateListener);
-    widget.socket.on("REACTION", _reactionListener);
-    widget.socket.on("CHAT_MESSAGE", _chatListener);
-    widget.socket.on("INFO", _infoListener);
-    widget.socket.on("MEMBERS_LIST", _membersListener);
-    widget.socket.on("KICKED", _kickedListener);
-    widget.socket.on("PARTY_STATE", _partyStateListener);
-    widget.socket.on("THEME_UPDATE", _themeListener);
-
-    // Connection Status Listeners
-    widget.socket.onDisconnect((_) {
-      if (mounted) setState(() => isDisconnected = true);
-    });
-    widget.socket.onConnect((_) {
-      if (mounted) setState(() => isDisconnected = false);
-    });
-
-    // Request initial size
-    // Note: The server should emit this on join, but we can also rely on subsequent updates.
-
-    widget.socket.on("PARTY_ENDED", (data) {
-      if (!mounted) return;
-
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(data["message"] ?? "Party ended")));
-
-      Navigator.of(context).popUntil((route) => route.isFirst);
-    });
-
-    widget.socket.on("HOST_UPDATE", (data) {
-      if (!mounted) return;
-      final newHostId = data["hostId"];
-      setState(() {
-        isHost = newHostId == widget.socket.id;
-      });
-      if (isHost) {
-        _addSystemMessage("You are now the host!");
-      }
     });
   }
 
-  void _addSystemMessage(String text) {
-    setState(() {
-      messages.add({
-        'id': DateTime.now().millisecondsSinceEpoch.toString(),
-        'text': text,
-        'type': 'system',
-        'timestamp': DateTime.now().millisecondsSinceEpoch,
+  void _initPlayer(DetailedPartyState state) {
+    final videoId = YoutubePlayer.convertUrlToId(
+      state.queue[state.currentIndex]["url"],
+    );
+    if (videoId != null) {
+      _controller = YoutubePlayerController(
+        initialVideoId: videoId,
+        flags: const YoutubePlayerFlags(
+          autoPlay: false,
+          mute: false,
+          hideControls: true,
+          disableDragSeek: true,
+        ),
+      );
+      _controller!.addListener(() {
+        if (_controller!.value.hasError) {
+          _handlePlayerError(_controller!.value.errorCode.toString());
+        }
       });
-      if (_tabController.index != 1) {
-        _unreadMessages++;
-      }
-    });
+    }
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    final partyState = ref.read(partyStateProvider);
     if (state == AppLifecycleState.resumed) {
-      if (_isPlaying && _controller != null && !_controller!.value.isPlaying) {
+      if (partyState.isPlaying &&
+          _controller != null &&
+          !_controller!.value.isPlaying) {
         _controller!.play();
       }
     }
   }
 
-  // ---------------- PLAYBACK HANDLER ----------------
-  void _onPlaybackUpdate(dynamic data) {
+  void _onPlaybackStateChanged(
+    DetailedPartyState? previous,
+    DetailedPartyState next,
+  ) {
     if (!mounted) return;
 
-    final bool isPlaying = data["isPlaying"] == true;
-
-    // Notify guests about host actions
-    if (!isHost && _isPlaying != isPlaying) {
-      ScaffoldMessenger.of(context).hideCurrentSnackBar();
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            isPlaying ? "Host started playing" : "Host paused playback",
-          ),
-          duration: const Duration(seconds: 2),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
-    }
-
-    _isPlaying = isPlaying;
-
-    if (!isPlaying) {
+    if (!next.isPlaying) {
       _controller?.pause();
-      // Force UI update to show Play button
-      setState(() {});
       return;
     }
 
-    final int index = data["currentIndex"] ?? 0;
-    final int startedAt = (data["startedAt"] as num?)?.toInt() ?? 0;
+    if (next.queue.isEmpty || next.currentIndex >= next.queue.length) return;
 
-    // Check for end of queue state
-    if (queue.isNotEmpty && index >= queue.length) {
-      setState(() {
-        currentIndex = index;
-      });
-      return;
-    }
-
-    if (queue.isEmpty) return;
-
-    bool trackChanged = (index != currentIndex);
-    currentIndex = index;
-    _serverStartedAt = startedAt;
-
-    final videoId = YoutubePlayer.convertUrlToId(queue[currentIndex]["url"]);
+    bool trackChanged =
+        (previous == null || next.currentIndex != previous.currentIndex);
+    final videoId = YoutubePlayer.convertUrlToId(
+      next.queue[next.currentIndex]["url"],
+    );
     if (videoId == null) return;
 
     if (_controller != null) {
       if (trackChanged) {
         int startSeconds = 0;
         final now = DateTime.now().millisecondsSinceEpoch;
-        if (startedAt > 0 && now > startedAt) {
-          startSeconds = (now - startedAt) ~/ 1000;
+        if (next.startedAt != null && now > next.startedAt!) {
+          startSeconds = (now - next.startedAt!) ~/ 1000;
         }
         _controller!.load(videoId, startAt: startSeconds);
       } else {
+        // Sync logic
         final now = DateTime.now().millisecondsSinceEpoch;
-        final seekMs = now - startedAt;
-        if ((_controller!.value.position.inMilliseconds - seekMs).abs() >
-            1000) {
-          _controller!.seekTo(Duration(milliseconds: seekMs));
+        if (next.startedAt != null) {
+          final seekMs = now - next.startedAt!;
+          final localPos = _controller!.value.position.inMilliseconds;
+          if ((localPos - seekMs).abs() > 2000) {
+            _controller!.seekTo(Duration(milliseconds: seekMs));
+          }
         }
         if (!_controller!.value.isPlaying) _controller!.play();
       }
-      setState(() {});
-      return;
-    }
-
-    _controller = YoutubePlayerController(
-      initialVideoId: videoId,
-      flags: const YoutubePlayerFlags(
-        autoPlay: false,
-        mute: false,
-        hideControls: true,
-        disableDragSeek: true,
-      ),
-    );
-    _controller!.addListener(() {
-      if (_controller!.value.hasError) {
-        _handlePlayerError(_controller!.value.errorCode.toString());
-      }
-    });
-    setState(() {});
-  }
-
-  // ---------------- SYNC HANDLER ----------------
-  void _onSync(dynamic data) {
-    if (!mounted) return;
-
-    final int serverIndex = data["currentIndex"] ?? currentIndex;
-    if (serverIndex != currentIndex) {
-      _onPlaybackUpdate({
-        "isPlaying": true,
-        "currentIndex": serverIndex,
-        "startedAt": data["startedAt"],
-      });
-      return;
-    }
-
-    if (_controller == null || !_controller!.value.isPlaying) return;
-
-    final int startedAt = (data["startedAt"] as num).toInt();
-    final now = DateTime.now().millisecondsSinceEpoch;
-    final serverPos = now - startedAt;
-    final localPos = _controller!.value.position.inMilliseconds;
-
-    if ((serverPos - localPos).abs() > 2000) {
-      _controller!.seekTo(Duration(milliseconds: serverPos));
+    } else {
+      _initPlayer(next);
+      setState(() {}); // Rebuild to show player
     }
   }
 
-  // ---------------- SEARCH & ADD ----------------
+  // ---------------- ACTIONS ----------------
   void _onSearchChanged(String query) {
     if (_debounce?.isActive ?? false) _debounce!.cancel();
-
     if (query.trim().isEmpty) {
       setState(() {
         searchResults = [];
@@ -503,7 +245,6 @@ class _PartyScreenState extends State<PartyScreen>
       });
       return;
     }
-
     _debounce = Timer(const Duration(milliseconds: 500), () async {
       setState(() => isSearching = true);
       final results = await _ytService.searchVideos(query);
@@ -517,17 +258,23 @@ class _PartyScreenState extends State<PartyScreen>
   }
 
   void _addVideo(yt.Video video) {
-    widget.socket.emit("ADD_TRACK", {
-      "partyId": widget.party["id"],
-      "track": {
-        "url": video.url,
-        "title": video.title,
-        "addedBy": widget.username,
-      },
+    ref.read(partyStateProvider.notifier).addTrack(widget.party["id"], {
+      "url": video.url,
+      "title": video.title,
+      "addedBy": widget.username,
     });
     searchCtrl.clear();
     setState(() => searchResults = []);
     FocusScope.of(context).unfocus();
+    
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text("Added '${video.title}' to queue"),
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: Colors.green,
+        duration: const Duration(seconds: 2),
+      ),
+    );
   }
 
   void _leaveParty() {
@@ -544,8 +291,8 @@ class _PartyScreenState extends State<PartyScreen>
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
             onPressed: () {
-              Navigator.pop(context); // Close dialog
-              Navigator.pop(context); // Go back to Home
+              Navigator.pop(context);
+              Navigator.pop(context);
             },
             child: const Text("Leave"),
           ),
@@ -571,7 +318,9 @@ class _PartyScreenState extends State<PartyScreen>
             style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
             onPressed: () {
               Navigator.pop(context);
-              widget.socket.emit("END_PARTY", {"partyId": widget.party["id"]});
+              ref
+                  .read(partyStateProvider.notifier)
+                  .endParty(widget.party["id"]);
             },
             child: const Text("End Party"),
           ),
@@ -580,49 +329,32 @@ class _PartyScreenState extends State<PartyScreen>
     );
   }
 
-  void _pause() => widget.socket.emit("PAUSE", {"partyId": widget.party["id"]});
+  void _pause() =>
+      ref.read(partyStateProvider.notifier).pause(widget.party["id"]);
   void _resyncPlay() =>
-      widget.socket.emit("PLAY", {"partyId": widget.party["id"]});
-
-  void _changeTrack(int index) {
-    widget.socket.emit("CHANGE_INDEX", {
-      "partyId": widget.party["id"],
-      "newIndex": index,
-    });
-  }
-
-  void _prevTrack() => _changeTrack(currentIndex - 1);
-  void _nextTrack() => _changeTrack(currentIndex + 1);
-
-  void _removeTrack(String trackId) {
-    widget.socket.emit("REMOVE_TRACK", {
-      "partyId": widget.party["id"],
-      "trackId": trackId,
-    });
-  }
-
-  void _voteSkip() {
-    widget.socket.emit("VOTE_SKIP", {"partyId": widget.party["id"]});
-  }
-
-  void _sendReaction(String emoji) {
-    widget.socket.emit("SEND_REACTION", {
-      "partyId": widget.party["id"],
-      "emoji": emoji,
-    });
-    // Optimistic UI update
-    _reactionStreamCtrl.add(emoji);
-  }
+      ref.read(partyStateProvider.notifier).play(widget.party["id"]);
+  void _changeTrack(int index) => ref
+      .read(partyStateProvider.notifier)
+      .changeTrack(widget.party["id"], index);
+  void _prevTrack() =>
+      _changeTrack(ref.read(partyStateProvider).currentIndex - 1);
+  void _nextTrack() =>
+      _changeTrack(ref.read(partyStateProvider).currentIndex + 1);
+  void _removeTrack(String trackId) => ref
+      .read(partyStateProvider.notifier)
+      .removeTrack(widget.party["id"], trackId);
+  void _voteSkip() =>
+      ref.read(partyStateProvider.notifier).voteSkip(widget.party["id"]);
+  void _sendReaction(String emoji) => ref
+      .read(partyStateProvider.notifier)
+      .sendReaction(widget.party["id"], emoji);
 
   void _sendMessage() {
     final text = chatCtrl.text.trim();
     if (text.isEmpty) return;
-
-    widget.socket.emit("SEND_MESSAGE", {
-      "partyId": widget.party["id"],
-      "message": text,
-      "username": widget.username,
-    });
+    ref
+        .read(partyStateProvider.notifier)
+        .sendMessage(widget.party["id"], text, widget.username);
     chatCtrl.clear();
   }
 
@@ -662,7 +394,6 @@ class _PartyScreenState extends State<PartyScreen>
   void _shareParty() {
     final serverUrl = RemoteConfigService().getServerUrl();
     final link = "$serverUrl/join/${widget.party["id"]}";
-
     SharePlus.instance.share(
       ShareParams(
         text: "Join my music party on Sync Music! Click here: $link",
@@ -671,14 +402,8 @@ class _PartyScreenState extends State<PartyScreen>
     );
   }
 
-  void _changeTheme() {
-    final nextIndex = (_currentThemeIndex + 1) % _themes.length;
-    widget.socket.emit("CHANGE_THEME", {
-      "partyId": widget.party["id"],
-      "themeIndex": nextIndex,
-    });
-  }
-
+  void _changeTheme() =>
+      ref.read(partyStateProvider.notifier).changeTheme(widget.party["id"]);
   void _kickUser(String targetId, String username) {
     showDialog(
       context: context,
@@ -696,10 +421,9 @@ class _PartyScreenState extends State<PartyScreen>
             style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
             onPressed: () {
               Navigator.pop(context);
-              widget.socket.emit("KICK_USER", {
-                "partyId": widget.party["id"],
-                "targetId": targetId,
-              });
+              ref
+                  .read(partyStateProvider.notifier)
+                  .kickUser(widget.party["id"], targetId);
             },
             child: const Text("Kick"),
           ),
@@ -709,7 +433,10 @@ class _PartyScreenState extends State<PartyScreen>
   }
 
   void _showMembersList() {
-    debugPrint("apk: Memebers list: $membersList");
+    final members = ref.read(partyStateProvider).members;
+    final socket = ref.read(socketProvider);
+    final isHost = ref.read(partyProvider).isHost;
+
     showModalBottomSheet(
       context: context,
       backgroundColor: const Color(0xFF1E1E1E),
@@ -734,7 +461,7 @@ class _PartyScreenState extends State<PartyScreen>
               ),
               const SizedBox(height: 16),
               Expanded(
-                child: membersList.isEmpty
+                child: members.isEmpty
                     ? const Center(
                         child: Text(
                           "Loading members...",
@@ -742,18 +469,17 @@ class _PartyScreenState extends State<PartyScreen>
                         ),
                       )
                     : ListView.builder(
-                        itemCount: membersList.length,
+                        itemCount: members.length,
                         itemBuilder: (context, index) {
-                          final member = membersList[index];
-                          final isMe = member['id'] == widget.socket.id;
+                          final member = members[index];
+                          final isMe = member['id'] == socket.id;
                           final isMemberHost = member['isHost'] == true;
-
                           return ListTile(
                             leading: Container(
                               width: 40,
                               height: 40,
                               alignment: Alignment.center,
-                              decoration: BoxDecoration(
+                              decoration: const BoxDecoration(
                                 color: Colors.white10,
                                 shape: BoxShape.circle,
                               ),
@@ -783,9 +509,7 @@ class _PartyScreenState extends State<PartyScreen>
                                       color: Colors.redAccent,
                                     ),
                                     onPressed: () {
-                                      Navigator.pop(
-                                        context,
-                                      ); // Close sheet before dialog
+                                      Navigator.pop(context);
                                       _kickUser(
                                         member['id'],
                                         member['username'],
@@ -808,40 +532,44 @@ class _PartyScreenState extends State<PartyScreen>
   void dispose() {
     WakelockPlus.disable();
     WidgetsBinding.instance.removeObserver(this);
-    widget.socket.off("PLAYBACK_UPDATE", _playbackListener);
-    widget.socket.off("QUEUE_UPDATED", _queueListener);
-    widget.socket.off("SYNC", _syncListener);
-    widget.socket.off("ERROR", _errorListener);
-    widget.socket.off("PARTY_SIZE", _partySizeListener);
-    widget.socket.off("VOTE_UPDATE", _voteUpdateListener);
-    widget.socket.off("REACTION", _reactionListener);
-    widget.socket.off("CHAT_MESSAGE", _chatListener);
-    widget.socket.off("INFO", _infoListener);
-    widget.socket.off("MEMBERS_LIST", _membersListener);
-    widget.socket.off("KICKED", _kickedListener);
-    widget.socket.off("PARTY_STATE", _partyStateListener);
-    widget.socket.off("THEME_UPDATE", _themeListener);
-    widget.socket.off("PARTY_ENDED");
-    widget.socket.off("HOST_UPDATE");
     _controller?.dispose();
     searchCtrl.dispose();
     chatCtrl.dispose();
     _reactionStreamCtrl.close();
     _tabController.dispose();
-
     _ytService.dispose();
     _debounce?.cancel();
     super.dispose();
   }
 
-  // ---------------- UI ----------------
   @override
   Widget build(BuildContext context) {
-    final bool isEndOfQueue = currentIndex >= queue.length && queue.isNotEmpty;
-    final bool isEmptyQueue = queue.isEmpty;
+    final partyState = ref.watch(partyStateProvider);
+    final partyMeta = ref.watch(partyProvider);
+    final isHost = partyMeta.isHost;
+    final socket = ref.watch(socketProvider);
+
+    ref.listen(partyStateProvider, (previous, next) {
+      _onPlaybackStateChanged(previous, next);
+
+      // Update unread messages if chat tab is not active
+      if (next.messages.length > (previous?.messages.length ?? 0)) {
+        if (_tabController.index != 1) {
+          setState(
+            () => _unreadMessages +=
+                (next.messages.length - (previous?.messages.length ?? 0)),
+          );
+        }
+      }
+    });
+
+    final bool isEndOfQueue =
+        partyState.currentIndex >= partyState.queue.length &&
+        partyState.queue.isNotEmpty;
+    final bool isEmptyQueue = partyState.queue.isEmpty;
     final bool showPlayer = !isEmptyQueue && !isEndOfQueue;
 
-    // --- WIDGET COMPONENTS ---
+    // --- RE-USED WIDGETS ---
     Widget header = Padding(
       padding: const EdgeInsets.all(16),
       child: Row(
@@ -850,13 +578,22 @@ class _PartyScreenState extends State<PartyScreen>
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                "PARTY: ${widget.party["id"]}",
-                style: const TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                  letterSpacing: 2,
-                  color: Colors.white,
+              InkWell(
+                onTap: _copyCode,
+                child: Row(
+                  children: [
+                    Text(
+                      "PARTY: ${widget.party["id"]}",
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 2,
+                        color: Colors.white,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    const Icon(Icons.copy, size: 16),
+                  ],
                 ),
               ),
               Row(
@@ -872,31 +609,25 @@ class _PartyScreenState extends State<PartyScreen>
                     onPressed: _shareParty,
                   ),
                   if (isHost) ...[
-                    Padding(
-                      padding: const EdgeInsets.only(right: 8.0),
-                      child: IconButton(
-                        icon: const Icon(
-                          Icons.palette,
-                          size: 20,
-                          color: Colors.white70,
-                        ),
-                        constraints: const BoxConstraints(),
-                        padding: EdgeInsets.zero,
-                        onPressed: _changeTheme,
+                    IconButton(
+                      icon: const Icon(
+                        Icons.palette,
+                        size: 20,
+                        color: Colors.white70,
                       ),
+                      constraints: const BoxConstraints(),
+                      padding: const EdgeInsets.only(right: 8),
+                      onPressed: _changeTheme,
                     ),
-                    Padding(
-                      padding: const EdgeInsets.only(right: 8.0),
-                      child: IconButton(
-                        icon: const Icon(
-                          Icons.qr_code,
-                          size: 20,
-                          color: Colors.white70,
-                        ),
-                        constraints: const BoxConstraints(),
-                        padding: EdgeInsets.zero,
-                        onPressed: _showQRCode,
+                    IconButton(
+                      icon: const Icon(
+                        Icons.qr_code,
+                        size: 20,
+                        color: Colors.white70,
                       ),
+                      constraints: const BoxConstraints(),
+                      padding: const EdgeInsets.only(right: 8),
+                      onPressed: _showQRCode,
                     ),
                   ],
                 ],
@@ -909,7 +640,7 @@ class _PartyScreenState extends State<PartyScreen>
                     const Icon(Icons.people, size: 14, color: Colors.white70),
                     const SizedBox(width: 4),
                     Text(
-                      "$partySize Online",
+                      "${partyState.partySize} Online",
                       style: const TextStyle(
                         color: Colors.white70,
                         fontSize: 12,
@@ -921,20 +652,42 @@ class _PartyScreenState extends State<PartyScreen>
               ),
             ],
           ),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-            decoration: BoxDecoration(
-              color: isHost ? const Color(0xFFBB86FC) : const Color(0xFF03DAC6),
-              borderRadius: BorderRadius.circular(20),
-            ),
-            child: Text(
-              isHost ? "HOST" : "GUEST",
-              style: const TextStyle(
-                color: Colors.black,
-                fontWeight: FontWeight.bold,
-                fontSize: 10,
+          Row(
+            children: [
+               // Connection Status Dot
+               Container(
+                width: 8,
+                height: 8,
+                margin: const EdgeInsets.only(right: 8),
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: partyState.isDisconnected ? Colors.red : Colors.green,
+                  boxShadow: [
+                    if (!partyState.isDisconnected)
+                      BoxShadow(
+                        color: Colors.green.withOpacity(0.5),
+                        blurRadius: 4,
+                        spreadRadius: 1,
+                      ),
+                  ],
+                ),
+               ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  color: isHost ? const Color(0xFFBB86FC) : const Color(0xFF03DAC6),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Text(
+                  isHost ? "HOST" : "GUEST",
+                  style: const TextStyle(
+                    color: Colors.black,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 10,
+                  ),
+                ),
               ),
-            ),
+            ],
           ),
         ],
       ),
@@ -948,29 +701,32 @@ class _PartyScreenState extends State<PartyScreen>
           color: Colors.black,
           child: showPlayer
               ? (_controller == null
-                    ? Center(
-                        child: Text(
-                          _isPlaying ? "Loading..." : "Waiting...",
-                          style: const TextStyle(color: Colors.white54),
-                        ),
-                      )
+                    ? const Center(child: CircularProgressIndicator())
                     : YoutubePlayer(
                         controller: _controller!,
                         showVideoProgressIndicator: true,
                         progressIndicatorColor: Theme.of(context).primaryColor,
                         onEnded: (_) {
-                          if (isHost && _lastEndedIndex != currentIndex) {
-                            _lastEndedIndex = currentIndex;
-                            widget.socket.emit("TRACK_ENDED", {
-                              "partyId": widget.party["id"],
-                            });
+                          if (isHost &&
+                              _lastEndedIndex != partyState.currentIndex) {
+                            _lastEndedIndex = partyState.currentIndex;
+                            ref
+                                .read(partyStateProvider.notifier)
+                                .endTrack(widget.party["id"]);
                           }
                         },
                         onReady: () {
-                          if (_serverStartedAt != null && _isPlaying) {
+                          final state = ref.read(partyStateProvider);
+                          if (state.isPlaying) {
+                            int startSeconds = 0;
                             final now = DateTime.now().millisecondsSinceEpoch;
-                            final seekMs = now - _serverStartedAt!;
-                            _controller!.seekTo(Duration(milliseconds: seekMs));
+                            if (state.startedAt != null &&
+                                now > state.startedAt!) {
+                              startSeconds = (now - state.startedAt!) ~/ 1000;
+                            }
+                            _controller!.seekTo(
+                              Duration(seconds: startSeconds),
+                            );
                             _controller!.play();
                           }
                         },
@@ -979,7 +735,11 @@ class _PartyScreenState extends State<PartyScreen>
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Icon(Icons.queue_music, size: 48, color: Colors.white24),
+                      const Icon(
+                        Icons.queue_music,
+                        size: 48,
+                        color: Colors.white24,
+                      ),
                       const SizedBox(height: 16),
                       Text(
                         isEndOfQueue ? "End of Queue" : "Queue is Empty",
@@ -989,9 +749,9 @@ class _PartyScreenState extends State<PartyScreen>
                         ),
                       ),
                       const SizedBox(height: 8),
-                      Text(
+                      const Text(
                         "Add songs to continue the party!",
-                        style: const TextStyle(color: Colors.white38),
+                        style: TextStyle(color: Colors.white38),
                       ),
                     ],
                   ),
@@ -1009,7 +769,7 @@ class _PartyScreenState extends State<PartyScreen>
             onTap: () => _sendReaction(emoji),
             child: Container(
               padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
+              decoration: const BoxDecoration(
                 color: Colors.white10,
                 shape: BoxShape.circle,
               ),
@@ -1032,19 +792,20 @@ class _PartyScreenState extends State<PartyScreen>
                   child: ElevatedButton.icon(
                     icon: const Icon(Icons.thumbs_up_down_outlined),
                     label: Text(
-                      partySize < 5
-                          ? "Vote Skip (Need 5+ Users)"
-                          : "Vote to Skip ($votesCount/$votesRequired)",
+                      partyState.partySize < 5
+                          ? "Need 5+ Users to Vote (Current: ${partyState.partySize})"
+                          : "Vote to Skip (${partyState.votesCount}/${partyState.votesRequired} from ${partyState.partySize})",
                     ),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: partySize < 5
+                      backgroundColor: partyState.partySize < 5
                           ? Colors.grey
                           : Colors.amber,
                       foregroundColor: Colors.black,
                     ),
-                    onPressed: partySize >= 5 ? _voteSkip : null,
+                    onPressed: partyState.partySize >= 5 ? _voteSkip : null,
                   ),
                 ),
+
                 const SizedBox(height: 12),
                 SizedBox(
                   width: double.infinity,
@@ -1052,7 +813,7 @@ class _PartyScreenState extends State<PartyScreen>
                     icon: const Icon(Icons.exit_to_app),
                     label: const Text("LEAVE PARTY"),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.red.withValues(alpha: 0.8),
+                      backgroundColor: Colors.red.withValues(alpha: 0.4),
                       foregroundColor: Colors.white,
                     ),
                     onPressed: _leaveParty,
@@ -1073,24 +834,26 @@ class _PartyScreenState extends State<PartyScreen>
                       iconSize: 42,
                       icon: const Icon(Icons.skip_previous),
                       color: Colors.white,
-                      onPressed: currentIndex > 0 ? _prevTrack : null,
+                      onPressed: partyState.currentIndex > 0
+                          ? _prevTrack
+                          : null,
                     ),
                     IconButton(
                       iconSize: 56,
                       icon: Icon(
-                        _isPlaying
+                        partyState.isPlaying
                             ? Icons.pause_circle_filled
                             : Icons.play_circle_fill,
                       ),
-
                       color: Theme.of(context).primaryColor,
-                      onPressed: _isPlaying ? _pause : _resyncPlay,
+                      onPressed: partyState.isPlaying ? _pause : _resyncPlay,
                     ),
                     IconButton(
                       iconSize: 42,
                       icon: const Icon(Icons.skip_next),
                       color: Colors.white,
-                      onPressed: currentIndex < queue.length - 1
+                      onPressed:
+                          partyState.currentIndex < partyState.queue.length - 1
                           ? _nextTrack
                           : null,
                     ),
@@ -1117,37 +880,16 @@ class _PartyScreenState extends State<PartyScreen>
 
     Widget searchBar = Container(
       padding: const EdgeInsets.all(16),
-      color: const Color(0xFF1E1E1E),
+      // color: const Color(0xFF1E1E1E),
+      color: Colors.transparent,
       child: Column(
         children: [
-          TextField(
-            controller: searchCtrl,
-            onChanged: _onSearchChanged,
-            decoration: InputDecoration(
-              hintText: "Search YouTube songs...",
-              prefixIcon: const Icon(Icons.search),
-              suffixIcon: isSearching
-                  ? const SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : null,
-              filled: true,
-              fillColor: Colors.black,
-              contentPadding: const EdgeInsets.symmetric(horizontal: 16),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(30),
-                borderSide: BorderSide.none,
-              ),
-            ),
-          ),
           if (searchResults.isNotEmpty)
             Container(
               constraints: const BoxConstraints(maxHeight: 150),
               margin: const EdgeInsets.only(top: 8),
               decoration: BoxDecoration(
-                color: Colors.black,
+                color: Colors.transparent,
                 borderRadius: BorderRadius.circular(12),
               ),
               child: ListView.builder(
@@ -1173,16 +915,38 @@ class _PartyScreenState extends State<PartyScreen>
                 },
               ),
             ),
+
+            TextField(
+            controller: searchCtrl,
+            onChanged: _onSearchChanged,
+            textInputAction: TextInputAction.search,
+            style: const TextStyle(color: Colors.white),
+            decoration: InputDecoration(
+              hintText: "Search YouTube songs",
+              hintStyle: TextStyle(color: Colors.grey.shade400),
+              filled: true,
+              fillColor: Colors.white10,
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 20,
+                vertical: 14,
+              ),
+              prefixIcon: const Icon(Icons.search, color: Colors.grey),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(30),
+                borderSide: BorderSide.none,
+              ),
+            ),
+          ),
         ],
       ),
     );
 
     Widget queueList = ListView.builder(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      itemCount: queue.length,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+      itemCount: partyState.queue.length,
       itemBuilder: (context, i) {
-        final track = queue[i];
-        final isCurrent = i == currentIndex;
+        final track = partyState.queue[i];
+        final isCurrent = i == partyState.currentIndex;
         return Padding(
           padding: const EdgeInsets.only(bottom: 8),
           child: GlassCard(
@@ -1233,7 +997,7 @@ class _PartyScreenState extends State<PartyScreen>
     Widget chatView = Column(
       children: [
         Expanded(
-          child: messages.isEmpty
+          child: partyState.messages.isEmpty
               ? Center(
                   child: Text(
                     "Welcome to chat, Say hi!",
@@ -1243,10 +1007,10 @@ class _PartyScreenState extends State<PartyScreen>
               : ListView.builder(
                   reverse: true,
                   padding: const EdgeInsets.all(16),
-                  itemCount: messages.length,
+                  itemCount: partyState.messages.length,
                   itemBuilder: (context, index) {
-                    final msg = messages[messages.length - 1 - index];
-
+                    final msg = partyState
+                        .messages[partyState.messages.length - 1 - index];
                     if (msg['type'] == 'system') {
                       return Padding(
                         padding: const EdgeInsets.symmetric(vertical: 8.0),
@@ -1262,8 +1026,7 @@ class _PartyScreenState extends State<PartyScreen>
                         ),
                       );
                     }
-
-                    final isMe = msg['senderId'] == widget.socket.id;
+                    final isMe = msg['senderId'] == socket.id;
                     return Align(
                       alignment: isMe
                           ? Alignment.centerRight
@@ -1337,19 +1100,21 @@ class _PartyScreenState extends State<PartyScreen>
       ],
     );
 
+    final bool isKeyboardOpen = MediaQuery.of(context).viewInsets.bottom > 0;
+
     return Scaffold(
       body: FloatingEmojis(
         reactionStream: _reactionStreamCtrl.stream,
         child: Container(
-          decoration: BoxDecoration(gradient: _themes[_currentThemeIndex]),
+          decoration: BoxDecoration(gradient: _themes[partyState.themeIndex]),
           child: SafeArea(
             child: LayoutBuilder(
               builder: (context, constraints) {
-                // ---- TABLET / DESKTOP LAYOUT (> 600px) ----
+                // Desktop / Tablet Layout
                 if (constraints.maxWidth > 600) {
                   return Column(
                     children: [
-                      if (isDisconnected)
+                      if (partyState.isDisconnected)
                         Container(
                           width: double.infinity,
                           color: Colors.redAccent,
@@ -1363,7 +1128,6 @@ class _PartyScreenState extends State<PartyScreen>
                       Expanded(
                         child: Row(
                           children: [
-                            // LEFT COLUMN (Fixed)
                             Expanded(
                               flex: 5,
                               child: Column(
@@ -1395,9 +1159,7 @@ class _PartyScreenState extends State<PartyScreen>
                                 ],
                               ),
                             ),
-                            // DIVIDER
                             Container(width: 1, color: Colors.white10),
-                            // RIGHT COLUMN (Tabs)
                             Expanded(
                               flex: 4,
                               child: Column(
@@ -1467,10 +1229,10 @@ class _PartyScreenState extends State<PartyScreen>
                   );
                 }
 
-                // ---- MOBILE LAYOUT (< 600px) ----
+                // Mobile Layout (Reactive)
                 return Column(
                   children: [
-                    if (isDisconnected)
+                    if (partyState.isDisconnected)
                       Container(
                         width: double.infinity,
                         color: Colors.redAccent,
@@ -1481,13 +1243,20 @@ class _PartyScreenState extends State<PartyScreen>
                           style: TextStyle(color: Colors.white, fontSize: 12),
                         ),
                       ),
-                    Expanded(
-                      child: CustomScrollView(
-                        slivers: [
-                          SliverToBoxAdapter(
-                            child: Column(
+                    
+                    // Fixed Header (Always visible)
+                    header,
+
+                    // Collapsible Player & Controls
+                    AnimatedSize(
+                      duration: const Duration(milliseconds: 300),
+                      curve: Curves.easeInOut,
+                      child: SizedBox(
+                        height: isKeyboardOpen ? 0 : null,
+                        child: SingleChildScrollView(
+                           physics: const NeverScrollableScrollPhysics(),
+                           child: Column(
                               children: [
-                                header,
                                 Padding(
                                   padding: const EdgeInsets.symmetric(
                                     horizontal: 16,
@@ -1500,81 +1269,68 @@ class _PartyScreenState extends State<PartyScreen>
                                 controls,
                                 const SizedBox(height: 24),
                               ],
-                            ),
-                          ),
-                          SliverPersistentHeader(
-                            pinned: true,
-                            delegate: _SliverAppBarDelegate(
-                              TabBar(
-                                controller: _tabController,
-                                tabs: [
-                                  const Tab(text: "QUEUE"),
-                                  Tab(
-                                    child: Row(
-                                      mainAxisAlignment:
-                                          MainAxisAlignment.center,
-                                      children: [
-                                        const Text("CHAT"),
-                                        if (_unreadMessages > 0) ...[
-                                          const SizedBox(width: 6),
-                                          Container(
-                                            padding: const EdgeInsets.all(6),
-                                            decoration: const BoxDecoration(
-                                              color: Colors.red,
-                                              shape: BoxShape.circle,
-                                            ),
-                                            child: Text(
-                                              _unreadMessages > 9
-                                                  ? "9+"
-                                                  : _unreadMessages.toString(),
-                                              style: const TextStyle(
-                                                fontSize: 10,
-                                                color: Colors.white,
-                                                fontWeight: FontWeight.bold,
-                                              ),
-                                            ),
-                                          ),
-                                        ],
-                                      ],
+                           ),
+                        ),
+                      ),
+                    ),
+
+                    // Tabs (Always visible)
+                    TabBar(
+                        controller: _tabController,
+                        tabs: [
+                          const Tab(text: "QUEUE"),
+                          Tab(
+                            child: Row(
+                              mainAxisAlignment:
+                                  MainAxisAlignment.center,
+                              children: [
+                                const Text("CHAT"),
+                                if (_unreadMessages > 0) ...[
+                                  const SizedBox(width: 6),
+                                  Container(
+                                    padding: const EdgeInsets.all(6),
+                                    decoration: const BoxDecoration(
+                                      color: Colors.red,
+                                      shape: BoxShape.circle,
+                                    ),
+                                    child: Text(
+                                      _unreadMessages > 9
+                                          ? "9+"
+                                          : _unreadMessages.toString(),
+                                      style: const TextStyle(
+                                        fontSize: 10,
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.bold,
+                                      ),
                                     ),
                                   ),
                                 ],
-                                labelColor: Colors.white,
-                                unselectedLabelColor: Colors.grey,
-                                indicatorColor: Colors.purpleAccent,
-                              ),
-                              // backgroundColor: const Color(0xFF1A1A1A),
-                              backgroundColor: const Color(0xFF1A1A1A),
-                            ),
-                          ),
-                          SliverFillRemaining(
-                            child: TabBarView(
-                              controller: _tabController,
-                              children: [
-                                Column(
-                                  children: [
-                                    Expanded(child: queueList),
-                                    searchBar,
-                                  ],
-                                ),
-                                chatView,
                               ],
                             ),
                           ),
                         ],
+                        labelColor: Colors.white,
+                        unselectedLabelColor: Theme.of(
+                          context,
+                        ).disabledColor,
+                        indicatorColor: Theme.of(context).primaryColor,
+                      ),
+                    
+                    // Expanded Tab View (Takes remaining space)
+                    Expanded(
+                      child: TabBarView(
+                        controller: _tabController,
+                        children: [
+                          Column(
+                            children: [
+                              Expanded(child: queueList),
+                              searchBar,
+                            ],
+                          ),
+                          chatView,
+                        ],
                       ),
                     ),
-                    // Only show search bar if Queue tab is selected?
-                    // Actually, let's keep it sticky at bottom for now, mainly for Queue.
-                    // Ideally it should be inside Queue tab, but it was fixed at bottom.
-                    // Let's put it inside the Queue tab column above.
-                    // Wait, if I put it in Queue tab, it will scroll with it or stick to bottom of tab.
-                    // I put it in `Column` inside TabBarView above, so it sticks to bottom of that tab.
-                    // BUT, `queueList` is a ListView, so it needs `Expanded`.
-                    // I fixed that in Desktop view. In Mobile view, `queueList` is just the list.
-                    // The previous mobile layout had `searchBar` outside the ScrollView.
-
-                    // For Mobile, I moved searchBar inside the Queue Tab to keep UI clean when chatting.
                   ],
                 );
               },
@@ -1582,33 +1338,8 @@ class _PartyScreenState extends State<PartyScreen>
           ),
         ),
       ),
-      // ),
     );
   }
 }
+// Remove _SliverAppBarDelegate as it is no longer used
 
-class _SliverAppBarDelegate extends SliverPersistentHeaderDelegate {
-  final TabBar _tabBar;
-  final Color backgroundColor;
-
-  _SliverAppBarDelegate(this._tabBar, {required this.backgroundColor});
-
-  @override
-  double get minExtent => _tabBar.preferredSize.height;
-  @override
-  double get maxExtent => _tabBar.preferredSize.height;
-
-  @override
-  Widget build(
-    BuildContext context,
-    double shrinkOffset,
-    bool overlapsContent,
-  ) {
-    return Container(color: backgroundColor, child: _tabBar);
-  }
-
-  @override
-  bool shouldRebuild(_SliverAppBarDelegate oldDelegate) {
-    return true;
-  }
-}
