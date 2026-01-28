@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:math';
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 
@@ -17,12 +18,10 @@ class FloatingEmojis extends StatelessWidget {
   Widget build(BuildContext context) {
     return Stack(
       children: [
-        // The main content - static relative to the animation
-        child,
-        // The overlay - completely decoupled and ignores touches
+        RepaintBoundary(child: child),
         Positioned.fill(
           child: IgnorePointer(
-            child: _EmojiOverlay(reactionStream: reactionStream),
+            child: FloatingEmojiOverlay(reactionStream: reactionStream),
           ),
         ),
       ],
@@ -30,44 +29,100 @@ class FloatingEmojis extends StatelessWidget {
   }
 }
 
-class _EmojiOverlay extends StatefulWidget {
+class FloatingEmojiOverlay extends StatefulWidget {
   final Stream<String> reactionStream;
 
-  const _EmojiOverlay({required this.reactionStream});
+  const FloatingEmojiOverlay({super.key, required this.reactionStream});
 
   @override
-  State<_EmojiOverlay> createState() => _EmojiOverlayState();
+  State<FloatingEmojiOverlay> createState() =>
+      _FloatingEmojiOverlayState();
 }
 
-class _EmojiOverlayState extends State<_EmojiOverlay> with SingleTickerProviderStateMixin {
-  final List<Particle> _particles = [];
-  late Ticker _ticker;
-  final Random _random = Random();
-  double _lastTime = 0;
+class _FloatingEmojiOverlayState extends State<FloatingEmojiOverlay>
+    with SingleTickerProviderStateMixin {
+  late ParticleController _controller;
   StreamSubscription? _subscription;
 
   @override
   void initState() {
     super.initState();
-    _ticker = createTicker(_onTick);
-    _subscription = widget.reactionStream.listen(_addEmoji);
+    _controller = ParticleController(this)
+      ..speedFactor = 1.5 // 🔥 change this anytime (1.0 = normal)
+      ..maxParticles = 80;
+    _subscription =
+        widget.reactionStream.listen(_controller.addEmoji);
   }
 
-  void _addEmoji(String emoji) {
-    if (!mounted) return;
-    
-    // Start slightly below the visible area (1.1 height)
-    // Randomize X position
-    final particle = Particle(
-      emoji: emoji,
-      x: _random.nextDouble(), 
-      y: 1.1, 
-      size: _random.nextDouble() * 20 + 30, // 30-50 size
-      speed: _random.nextDouble() * 0.3 + 0.2, // 0.2 - 0.5 screen height per sec
-      wobbleOffset: _random.nextDouble() * 2 * pi,
-    );
+  @override
+  void dispose() {
+    _subscription?.cancel();
+    _controller.dispose();
+    super.dispose();
+  }
 
-    _particles.add(particle);
+  @override
+  Widget build(BuildContext context) {
+    return RepaintBoundary(
+      child: CustomPaint(
+        painter: _EmojiPainter(_controller),
+        willChange: true,
+      ),
+    );
+  }
+}
+
+// ------------------------------------------------------------
+
+class ParticleController extends ChangeNotifier {
+  final List<Particle> particles = [];
+  final TickerProvider vsync;
+  late final Ticker _ticker;
+  final Random _random = Random();
+
+  // ---- TUNABLES ----
+  double speedFactor = 1.0; // Global vertical speed
+  double wobbleSpeed = 4.0; // Horizontal motion speed
+  double wobbleAmount = 18.0; // Horizontal motion distance
+  int maxParticles = 60;
+
+  double _lastTime = 0;
+
+  // Cache for pre-rendered emoji images
+  final Map<String, ui.Image> _imageCache = {};
+
+  ParticleController(this.vsync) {
+    _ticker = vsync.createTicker(_onTick);
+  }
+
+  Future<void> addEmoji(String emoji) async {
+    // Limit particles for performance
+    if (particles.length >= maxParticles) {
+      particles.removeAt(0);
+    }
+
+    // Get or create cached image
+    ui.Image? image = _imageCache[emoji];
+    if (image == null) {
+      try {
+        image = await _renderEmojiToImage(emoji);
+        _imageCache[emoji] = image;
+      } catch (_) {
+        return;
+      }
+    }
+
+    particles.add(
+      Particle(
+        image: image,
+        x: _random.nextDouble(),
+        y: 1.1,
+        size: _random.nextDouble() * 16 + 28,
+        speed: (_random.nextDouble() * 0.3 + 0.25) *
+            speedFactor,
+        wobbleOffset: _random.nextDouble() * 2 * pi,
+      ),
+    );
 
     if (!_ticker.isActive) {
       _lastTime = 0;
@@ -75,57 +130,71 @@ class _EmojiOverlayState extends State<_EmojiOverlay> with SingleTickerProviderS
     }
   }
 
-  void _onTick(Duration elapsed) {
-    final double currentTime = elapsed.inMilliseconds / 1000.0;
-    final double dt = _lastTime == 0 ? 0.016 : currentTime - _lastTime;
-    _lastTime = currentTime;
+  Future<ui.Image> _renderEmojiToImage(String emoji) {
+    const double fontSize = 48.0;
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder);
 
-    if (_particles.isEmpty) {
+    final painter = TextPainter(
+      text: TextSpan(
+        text: emoji,
+        style: const TextStyle(fontSize: fontSize),
+      ),
+      textDirection: TextDirection.ltr,
+    );
+
+    painter.layout();
+    painter.paint(canvas, Offset.zero);
+
+    return recorder
+        .endRecording()
+        .toImage(painter.width.toInt(), painter.height.toInt());
+  }
+
+  void _onTick(Duration elapsed) {
+    if (particles.isEmpty) {
       _ticker.stop();
+      notifyListeners();
       return;
     }
 
-    setState(() {
-      _particles.removeWhere((p) {
-        p.update(dt);
-        // Remove when it goes well above the screen (-0.2)
-        return p.y < -0.2;
-      });
+    final currentTime =
+        elapsed.inMicroseconds / 1000000.0;
+    final dt = _lastTime == 0
+        ? 0.016
+        : (currentTime - _lastTime);
+    _lastTime = currentTime;
+
+    final safeDt = min(dt, 0.05); // smoother + responsive
+
+    particles.removeWhere((p) {
+      p.update(safeDt);
+      return p.y < -0.25;
     });
+
+    notifyListeners();
   }
 
   @override
   void dispose() {
     _ticker.dispose();
-    _subscription?.cancel();
     super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    // Only repaint this widget, nothing else
-    if (_particles.isEmpty) return const SizedBox.shrink();
-
-    return RepaintBoundary(
-      child: CustomPaint(
-        painter: _EmojiPainter(_particles),
-      ),
-    );
   }
 }
 
+// ------------------------------------------------------------
+
 class Particle {
-  String emoji;
-  double x; // 0.0 to 1.0 (relative to width)
-  double y; // 1.1 to -0.2 (relative to height)
+  final ui.Image image;
+  double x;
+  double y;
   double size;
   double speed;
   double wobbleOffset;
   double timeAlive = 0;
-  TextPainter? _textPainter;
 
   Particle({
-    required this.emoji,
+    required this.image,
     required this.x,
     required this.y,
     required this.size,
@@ -137,54 +206,60 @@ class Particle {
     timeAlive += dt;
     y -= speed * dt;
   }
-
-  TextPainter getPainter() {
-    if (_textPainter == null) {
-      _textPainter = TextPainter(
-        text: TextSpan(
-          text: emoji,
-          style: TextStyle(fontSize: size),
-        ),
-        textDirection: TextDirection.ltr,
-      );
-      _textPainter!.layout();
-    }
-    return _textPainter!;
-  }
 }
 
-class _EmojiPainter extends CustomPainter {
-  final List<Particle> particles;
+// ------------------------------------------------------------
 
-  _EmojiPainter(this.particles);
+class _EmojiPainter extends CustomPainter {
+  final ParticleController controller;
+  final Paint _paint = Paint()
+    ..filterQuality = FilterQuality.low; // faster
+
+  _EmojiPainter(this.controller) : super(repaint: controller);
 
   @override
   void paint(Canvas canvas, Size size) {
+    final particles = controller.particles;
+    if (particles.isEmpty) return;
+
     for (final p in particles) {
-      final painter = p.getPainter();
-      
-      // Calculate positions
-      final wobble = sin(p.timeAlive * 3 + p.wobbleOffset) * 20;
+      final wobble = sin(
+                p.timeAlive * controller.wobbleSpeed +
+                    p.wobbleOffset,
+              ) *
+          controller.wobbleAmount;
+
       final dx = p.x * size.width + wobble;
       final dy = p.y * size.height;
 
       canvas.save();
       canvas.translate(dx, dy);
 
-      // Fade out effect using Scale instead of Opacity (cheaper)
-      // Start scaling down when it reaches top 20% of screen
-      if (p.y < 0.2) {
-        final scale = (p.y + 0.2) / 0.4; // Map -0.2..0.2 to 0..1
-        final clampedScale = scale.clamp(0.0, 1.0);
-        canvas.scale(clampedScale);
+      double scale = p.size / p.image.height;
+
+      // Fade out near top
+      if (p.y < 0.25) {
+        final fade =
+            (p.y + 0.25) / 0.5;
+        scale *= fade.clamp(0.0, 1.0);
       }
 
-      // Draw centered
-      painter.paint(canvas, Offset(-painter.width / 2, -painter.height / 2));
+      canvas.scale(scale);
+
+      canvas.drawImage(
+        p.image,
+        Offset(
+          -p.image.width / 2,
+          -p.image.height / 2,
+        ),
+        _paint,
+      );
+
       canvas.restore();
     }
   }
 
   @override
-  bool shouldRepaint(_EmojiPainter oldDelegate) => true;
+  bool shouldRepaint(covariant _EmojiPainter oldDelegate) =>
+      true;
 }

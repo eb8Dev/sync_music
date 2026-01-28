@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 class AppTheme {
   static const Color background = Color(0xFF121212);
   static const Color surface = Color(0xFF1E1E1E);
-  static const Color primary = Color.fromARGB(255, 140, 252, 134);
+  static const Color primary = Color(0xFF8CFC86);
   static const Color secondary = Color(0xFF03DAC6);
   static const Color error = Color(0xFFCF6679);
   static const Color onBackground = Color(0xFFFFFFFF);
@@ -57,6 +57,12 @@ class AppTheme {
         ),
         hintStyle: TextStyle(color: onSurface.withOpacity(0.5)),
         contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+      ),
+      pageTransitionsTheme: const PageTransitionsTheme(
+        builders: {
+          TargetPlatform.android: ZoomPageTransitionsBuilder(),
+          TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
+        },
       ),
     );
   }

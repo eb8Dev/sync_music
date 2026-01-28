@@ -1,39 +1,38 @@
-import 'package:url_launcher/url_launcher.dart';
 import 'package:in_app_review/in_app_review.dart';
 import 'package:flutter/foundation.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class SupportService {
   final InAppReview _inAppReview = InAppReview.instance;
 
-  Future<void> contactSupport() async {
-    final Uri emailLaunchUri = Uri(
-      scheme: 'mailto',
-      path: 'eenadulab@gmail.com', // Replace with actual support email
-      query: _encodeQueryParameters(<String, String>{
-        'subject': 'Sync Music Support Request',
-        'body': 'Describe your issue here...',
-      }),
-    );
-
-    if (!await launchUrl(emailLaunchUri)) {
-      debugPrint('Could not launch support email');
-    }
-  }
+  // Replace with your real package name
+  static const String _androidPackageName =
+      "com.eb.sync_music";
 
   Future<void> requestReview() async {
-    if (await _inAppReview.isAvailable()) {
-      await _inAppReview.requestReview();
-    } else {
-      // Fallback: Open store listing directly if needed
-      // _inAppReview.openStoreListing(appStoreId: '...', microsoftStoreId: '...');
-      debugPrint('In-app review not available');
+    try {
+      if (await _inAppReview.isAvailable()) {
+        await _inAppReview.requestReview();
+      } else {
+        await openStoreListing();
+      }
+    } catch (e) {
+      debugPrint("Review error: $e");
+      await openStoreListing();
     }
   }
 
-  String? _encodeQueryParameters(Map<String, String> params) {
-    return params.entries
-        .map((e) =>
-            '${Uri.encodeComponent(e.key)}=${Uri.encodeComponent(e.value)}')
-        .join('&');
+  /// Opens Google Play listing directly
+  Future<void> openStoreListing() async {
+    final Uri playUri = Uri.parse(
+      "https://play.google.com/store/apps/details?id=$_androidPackageName",
+    );
+
+    if (!await launchUrl(
+      playUri,
+      mode: LaunchMode.externalApplication,
+    )) {
+      debugPrint("Could not open Play Store");
+    }
   }
 }

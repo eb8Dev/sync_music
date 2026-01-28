@@ -34,6 +34,21 @@ class YouTubeService {
     }
   }
 
+  Future<bool> isVideoPlayable(String videoId) async {
+    try {
+      // Try to get manifest. If it fails, it's likely restricted or unplayable.
+      await _yt.videos.streamsClient.getManifest(videoId);
+      
+      // Also check video details if possible (optional, but getManifest is usually enough)
+      // final video = await _yt.videos.get(videoId);
+      // if (video.isAgeRestricted) return false; // If property existed
+      
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
   void dispose() {
     _yt.close();
   }

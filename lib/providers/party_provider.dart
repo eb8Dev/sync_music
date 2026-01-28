@@ -59,6 +59,47 @@ class PartyNotifier extends Notifier<PartyState> {
   void _initListeners() {
     _socket.off("PARTY_STATE");
     _socket.off("ERROR");
+    _socket.off("connect"); // Clean up old listener if any
+
+    _socket.off("connect_error");
+    _socket.off("disconnect");
+
+    if (!_socket.hasListeners("connect")) {
+      _socket.on("connect", (_) {
+        debugPrint("Socket Connected!");
+        if (state.partyId != null) {
+           debugPrint("Auto-reconnecting to active party: ${state.partyId}");
+           final userState = ref.read(userProvider);
+           if (state.isHost) {
+              reconnectAsHost(
+                partyId: state.partyId!,
+                username: userState.username,
+                avatar: userState.avatar,
+              );
+           } else {
+              joinParty(
+                partyId: state.partyId!,
+                username: userState.username,
+                avatar: userState.avatar,
+              );
+           }
+        }
+      });
+    }
+
+    if (!_socket.hasListeners("connect_error")) {
+      _socket.on("connect_error", (err) {
+        debugPrint("Socket Connection Error: $err");
+        // Don't override state.error immediately as it might be transient
+        // But if we are in 'connecting' state, we might want to know
+      });
+    }
+
+    if (!_socket.hasListeners("disconnect")) {
+      _socket.on("disconnect", (_) {
+        debugPrint("Socket Disconnected");
+      });
+    }
     
     if (!_socket.hasListeners("PARTY_STATE")) {
        _socket.on("PARTY_STATE", (data) {
@@ -110,11 +151,11 @@ class PartyNotifier extends Notifier<PartyState> {
 
   void _startTimeout() {
     _cancelTimeout();
-    _connectionTimeoutTimer = Timer(const Duration(seconds: 15), () {
+    _connectionTimeoutTimer = Timer(const Duration(seconds: 90), () {
       if (state.connecting) {
         state = state.copyWith(
           connecting: false,
-          error: "Connection timed out. Please check your internet or try restarting the app.",
+          error: "Connection timed out. Please try again.",
         );
       }
     });
@@ -179,8 +220,34 @@ class PartyNotifier extends Notifier<PartyState> {
     required String partyId,
     required String username,
     required String avatar,
-  }) {
+  }) async {
     state = state.copyWith(connecting: true, error: null);
+
+    // Check kick status
+    final prefs = await SharedPreferences.getInstance();
+    final kickKey = "kicks_$partyId";
+    final kicks = prefs.getStringList(kickKey) ?? [];
+    
+    if (kicks.length >= 3) {
+      state = state.copyWith(
+        connecting: false, 
+        error: "You are restricted from joining this party."
+      );
+      return;
+    }
+    
+    if (kicks.isNotEmpty) {
+      final lastKick = DateTime.parse(kicks.last);
+      final diff = DateTime.now().difference(lastKick);
+      if (diff.inMinutes < 5) {
+         state = state.copyWith(
+          connecting: false, 
+          error: "You cannot join this party for another ${5 - diff.inMinutes} minutes."
+        );
+        return;
+      }
+    }
+
     _startTimeout();
     final userState = ref.read(userProvider);
     _socket.emit("JOIN_PARTY", {

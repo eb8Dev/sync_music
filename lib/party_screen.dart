@@ -1,10 +1,13 @@
 import 'dart:async';
+import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:sync_music/providers/party_provider.dart';
 import 'package:sync_music/providers/party_state_provider.dart';
 import 'package:sync_music/providers/socket_provider.dart';
+import 'package:sync_music/widgets/neon_empty.dart';
+import 'package:sync_music/widgets/neon_loader.dart';
 import 'package:youtube_player_flutter/youtube_player_flutter.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:sync_music/widgets/glass_card.dart';
@@ -14,6 +17,7 @@ import 'package:sync_music/services/remote_config_service.dart';
 import 'package:youtube_explode_dart/youtube_explode_dart.dart' as yt;
 import 'package:wakelock_plus/wakelock_plus.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class PartyScreen extends ConsumerStatefulWidget {
   final Map<String, dynamic> party;
@@ -72,21 +76,31 @@ class _PartyScreenState extends ConsumerState<PartyScreen>
 
   void _handlePlayerError(String error) {
     if (!mounted) return;
+
+    // Convert error to int if possible for check
+    int? errorCode = int.tryParse(error);
+
+    String message = "Playback Error: $error. Skipping...";
+    if (errorCode == 150 || errorCode == 101) {
+      message = "Video restricted (Error $errorCode). Skipping...";
+    } else if (errorCode == 100) {
+      message = "Video not found (Error 100). Skipping...";
+    }
+
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text("Playback Error: $error. Skipping..."),
+        content: Text(message),
         backgroundColor: Colors.red,
+        duration: const Duration(seconds: 2),
       ),
     );
 
     final isHost = ref.read(partyProvider).isHost;
     if (isHost) {
-      Future.delayed(const Duration(seconds: 3), () {
+      // Skip faster for restricted videos to avoid "stuck" feeling
+      Future.delayed(const Duration(seconds: 1), () {
         if (mounted && isHost) {
           ref.read(partyStateProvider.notifier).endTrack(widget.party["id"]);
-          // Wait, I need to add endTrack to notifier or emit directly.
-          // Let's emit directly for this specific case if I didn't add it.
-          // Or add it to notifier.
         }
       });
     }
@@ -120,39 +134,52 @@ class _PartyScreenState extends ConsumerState<PartyScreen>
     }
 
     // Listen for reactions directly from socket since it's a stream-like event
-    ref.read(socketProvider).on("REACTION", (data) {
-      if (mounted) {
-        _reactionStreamCtrl.add(data["emoji"] ?? "❤️");
-      }
-    });
+    ref.read(socketProvider).on("REACTION", _onReactionReceived);
+    ref.read(socketProvider).on("PARTY_ENDED", _onPartyEnded);
+    ref.read(socketProvider).on("KICKED", _onKicked);
+  }
 
-    ref.read(socketProvider).on("PARTY_ENDED", (data) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(data["message"] ?? "Party ended")));
-      Navigator.of(context).popUntil((route) => route.isFirst);
-    });
+  void _onReactionReceived(data) {
+    if (mounted) {
+      _reactionStreamCtrl.add(data["emoji"] ?? "❤️");
+    }
+  }
 
-    ref.read(socketProvider).on("KICKED", (msg) {
-      if (!mounted) return;
-      showDialog(
-        barrierDismissible: false,
-        context: context,
-        builder: (_) => AlertDialog(
-          title: const Text("You have been kicked"),
-          content: Text(msg.toString()),
-          actions: [
-            TextButton(
-              onPressed: () {
-                Navigator.of(context).popUntil((route) => route.isFirst);
-              },
-              child: const Text("OK"),
-            ),
-          ],
-        ),
-      );
-    });
+  void _onPartyEnded(data) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(data["message"] ?? "Party ended")));
+    Navigator.of(context).popUntil((route) => route.isFirst);
+  }
+
+  void _onKicked(msg) async {
+    if (!mounted) return;
+
+    final prefs = await SharedPreferences.getInstance();
+    final partyId = widget.party["id"];
+    final kickKey = "kicks_$partyId";
+    final kicks = prefs.getStringList(kickKey) ?? [];
+    kicks.add(DateTime.now().toIso8601String());
+    await prefs.setStringList(kickKey, kicks);
+
+    if (!mounted) return;
+    showDialog(
+      barrierDismissible: false,
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text("You have been kicked"),
+        content: Text(msg.toString()),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.of(context).popUntil((route) => route.isFirst);
+            },
+            child: const Text("OK"),
+          ),
+        ],
+      ),
+    );
   }
 
   void _initPlayer(DetailedPartyState state) {
@@ -257,7 +284,41 @@ class _PartyScreenState extends ConsumerState<PartyScreen>
     });
   }
 
-  void _addVideo(yt.Video video) {
+  Future<void> _addVideo(yt.Video video) async {
+    setState(() => isSearching = true);
+    final isPlayable = await _ytService.isVideoPlayable(video.id.value);
+    setState(() => isSearching = false);
+
+    if (!mounted) return;
+
+    if (!isPlayable) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            "Cannot add this video (Age Restricted or Unavailable).",
+          ),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
+    // Check for duplicates
+    final currentQueue = ref.read(partyStateProvider).queue;
+    final isDuplicate = currentQueue.any((track) {
+      final trackId = YoutubePlayer.convertUrlToId(track['url']);
+      return trackId == video.id.value;
+    });
+    if (isDuplicate) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("This song is already in the queue!"),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
     ref.read(partyStateProvider.notifier).addTrack(widget.party["id"], {
       "url": video.url,
       "title": video.title,
@@ -266,15 +327,6 @@ class _PartyScreenState extends ConsumerState<PartyScreen>
     searchCtrl.clear();
     setState(() => searchResults = []);
     FocusScope.of(context).unfocus();
-    
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text("Added '${video.title}' to queue"),
-        behavior: SnackBarBehavior.floating,
-        backgroundColor: Colors.green,
-        duration: const Duration(seconds: 2),
-      ),
-    );
   }
 
   void _leaveParty() {
@@ -396,7 +448,8 @@ class _PartyScreenState extends ConsumerState<PartyScreen>
     final link = "$serverUrl/join/${widget.party["id"]}";
     SharePlus.instance.share(
       ShareParams(
-        text: "Join my music party on Sync Music! Click here: $link",
+        text:
+            "Join my music party on Sync Music! use CODE: ${widget.party["id"]}.\nOr You can directly click on this $link here to join.",
         subject: "Join Sync Music Party",
       ),
     );
@@ -530,6 +583,11 @@ class _PartyScreenState extends ConsumerState<PartyScreen>
 
   @override
   void dispose() {
+    final socket = ref.read(socketProvider);
+    socket.off("REACTION", _onReactionReceived);
+    socket.off("PARTY_ENDED", _onPartyEnded);
+    socket.off("KICKED", _onKicked);
+
     WakelockPlus.disable();
     WidgetsBinding.instance.removeObserver(this);
     _controller?.dispose();
@@ -568,125 +626,124 @@ class _PartyScreenState extends ConsumerState<PartyScreen>
         partyState.queue.isNotEmpty;
     final bool isEmptyQueue = partyState.queue.isEmpty;
     final bool showPlayer = !isEmptyQueue && !isEndOfQueue;
+    Widget statusChip() {
+      final connected = !partyState.isDisconnected;
+      final bgColor = isHost
+          ? const Color(0xFF8CFC86)
+          : const Color(0xFF03DAC6);
+
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: bgColor,
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 6,
+              height: 6,
+              margin: const EdgeInsets.only(right: 6),
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: connected ? Colors.green : Colors.red,
+                boxShadow: connected
+                    ? [
+                        BoxShadow(
+                          color: Colors.green.withOpacity(0.5),
+                          blurRadius: 4,
+                          spreadRadius: 1,
+                        ),
+                      ]
+                    : [],
+              ),
+            ),
+            Text(
+              isHost ? "HOST" : "GUEST",
+              style: const TextStyle(
+                color: Colors.black,
+                fontWeight: FontWeight.bold,
+                fontSize: 10,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
 
     // --- RE-USED WIDGETS ---
     Widget header = Padding(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              InkWell(
-                onTap: _copyCode,
-                child: Row(
-                  children: [
-                    Text(
-                      "PARTY: ${widget.party["id"]}",
-                      style: const TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                        letterSpacing: 2,
-                        color: Colors.white,
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    const Icon(Icons.copy, size: 16),
-                  ],
-                ),
-              ),
-              Row(
-                children: [
-                  IconButton(
-                    icon: const Icon(
-                      Icons.share,
-                      size: 20,
-                      color: Colors.white70,
-                    ),
-                    constraints: const BoxConstraints(),
-                    padding: const EdgeInsets.only(right: 8),
-                    onPressed: _shareParty,
+          // Party ID + Copy
+          InkWell(
+            onTap: _copyCode,
+            borderRadius: BorderRadius.circular(12),
+            child: Row(
+              children: [
+                Text(
+                  "🎵 ${widget.party["id"]}",
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 1.5,
                   ),
-                  if (isHost) ...[
-                    IconButton(
-                      icon: const Icon(
-                        Icons.palette,
-                        size: 20,
-                        color: Colors.white70,
-                      ),
-                      constraints: const BoxConstraints(),
-                      padding: const EdgeInsets.only(right: 8),
-                      onPressed: _changeTheme,
-                    ),
-                    IconButton(
-                      icon: const Icon(
-                        Icons.qr_code,
-                        size: 20,
-                        color: Colors.white70,
-                      ),
-                      constraints: const BoxConstraints(),
-                      padding: const EdgeInsets.only(right: 8),
-                      onPressed: _showQRCode,
-                    ),
-                  ],
-                ],
-              ),
-              const SizedBox(height: 4),
-              GestureDetector(
-                onTap: _showMembersList,
-                child: Row(
-                  children: [
-                    const Icon(Icons.people, size: 14, color: Colors.white70),
-                    const SizedBox(width: 4),
-                    Text(
-                      "${partyState.partySize} Online",
-                      style: const TextStyle(
-                        color: Colors.white70,
-                        fontSize: 12,
-                        decoration: TextDecoration.underline,
-                      ),
-                    ),
-                  ],
                 ),
-              ),
-            ],
+                const SizedBox(width: 6),
+                const Icon(Icons.copy, size: 14, color: Colors.white70),
+              ],
+            ),
           ),
+
+          const SizedBox(width: 12),
+
+          // Members
+          GestureDetector(
+            onTap: _showMembersList,
+            child: Row(
+              children: [
+                const Icon(Icons.people, size: 14, color: Colors.white70),
+                const SizedBox(width: 4),
+                Text(
+                  "${partyState.partySize}",
+                  style: const TextStyle(
+                    color: Colors.white70,
+                    fontSize: 12,
+                    decoration: TextDecoration.underline,
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          const Spacer(),
+
+          // Actions
           Row(
             children: [
-               // Connection Status Dot
-               Container(
-                width: 8,
-                height: 8,
-                margin: const EdgeInsets.only(right: 8),
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: partyState.isDisconnected ? Colors.red : Colors.green,
-                  boxShadow: [
-                    if (!partyState.isDisconnected)
-                      BoxShadow(
-                        color: Colors.green.withOpacity(0.5),
-                        blurRadius: 4,
-                        spreadRadius: 1,
-                      ),
-                  ],
-                ),
-               ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                decoration: BoxDecoration(
-                  color: isHost ? const Color(0xFFBB86FC) : const Color(0xFF03DAC6),
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: Text(
-                  isHost ? "HOST" : "GUEST",
-                  style: const TextStyle(
-                    color: Colors.black,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 10,
-                  ),
-                ),
+              IconButton(
+                tooltip: "Share",
+                icon: const Icon(Icons.share, size: 20),
+                onPressed: _shareParty,
               ),
+              if (isHost)
+                IconButton(
+                  tooltip: "Theme",
+                  icon: const Icon(Icons.palette, size: 20),
+                  onPressed: _changeTheme,
+                ),
+              if (isHost)
+                IconButton(
+                  tooltip: "QR Code",
+                  icon: const Icon(Icons.qr_code, size: 20),
+                  onPressed: _showQRCode,
+                ),
+
+              const SizedBox(width: 6),
+
+              // Connection + Role Chip
+              statusChip(),
             ],
           ),
         ],
@@ -696,243 +753,371 @@ class _PartyScreenState extends ConsumerState<PartyScreen>
     Widget player = AspectRatio(
       aspectRatio: 16 / 9,
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(16),
-        child: Container(
-          color: Colors.black,
-          child: showPlayer
-              ? (_controller == null
-                    ? const Center(child: CircularProgressIndicator())
-                    : YoutubePlayer(
-                        controller: _controller!,
-                        showVideoProgressIndicator: true,
-                        progressIndicatorColor: Theme.of(context).primaryColor,
-                        onEnded: (_) {
-                          if (isHost &&
-                              _lastEndedIndex != partyState.currentIndex) {
-                            _lastEndedIndex = partyState.currentIndex;
-                            ref
-                                .read(partyStateProvider.notifier)
-                                .endTrack(widget.party["id"]);
-                          }
-                        },
-                        onReady: () {
-                          final state = ref.read(partyStateProvider);
-                          if (state.isPlaying) {
-                            int startSeconds = 0;
-                            final now = DateTime.now().millisecondsSinceEpoch;
-                            if (state.startedAt != null &&
-                                now > state.startedAt!) {
-                              startSeconds = (now - state.startedAt!) ~/ 1000;
-                            }
-                            _controller!.seekTo(
-                              Duration(seconds: startSeconds),
-                            );
-                            _controller!.play();
-                          }
-                        },
-                      ))
-              : Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const Icon(
-                        Icons.queue_music,
-                        size: 48,
-                        color: Colors.white24,
-                      ),
-                      const SizedBox(height: 16),
-                      Text(
-                        isEndOfQueue ? "End of Queue" : "Queue is Empty",
-                        style: const TextStyle(
-                          color: Colors.white54,
-                          fontSize: 18,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      const Text(
-                        "Add songs to continue the party!",
-                        style: TextStyle(color: Colors.white38),
-                      ),
-                    ],
-                  ),
+        borderRadius: BorderRadius.circular(24),
+        child: Stack(
+          children: [
+            // Background Glow Layer
+            Container(
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [Color(0xFF0A0F1F), Color(0xFF120A2A)],
                 ),
+              ),
+            ),
+
+            // Glass Blur Layer
+            BackdropFilter(
+              filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+              child: Container(
+                decoration: BoxDecoration(
+                  color: Colors.black.withOpacity(0.35),
+                  borderRadius: BorderRadius.circular(24),
+                  border: Border.all(
+                    color: Theme.of(
+                      context,
+                    ).colorScheme.primary.withOpacity(0.25),
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Theme.of(
+                        context,
+                      ).colorScheme.primary.withOpacity(0.35),
+                      blurRadius: 30,
+                      spreadRadius: 2,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+
+            // Content Layer
+            AnimatedSwitcher(
+              duration: const Duration(milliseconds: 400),
+              switchInCurve: Curves.easeOut,
+              switchOutCurve: Curves.easeIn,
+              child: showPlayer
+                  ? (_controller == null
+                        ? const NeonLoader()
+                        : ClipRRect(
+                            borderRadius: BorderRadius.circular(20),
+                            child: YoutubePlayer(
+                              key: const ValueKey("player"),
+                              controller: _controller!,
+                              showVideoProgressIndicator: true,
+                              progressIndicatorColor: Theme.of(
+                                context,
+                              ).colorScheme.primary,
+                              onEnded: (_) {
+                                if (isHost &&
+                                    _lastEndedIndex !=
+                                        partyState.currentIndex) {
+                                  _lastEndedIndex = partyState.currentIndex;
+                                  ref
+                                      .read(partyStateProvider.notifier)
+                                      .endTrack(widget.party["id"]);
+                                }
+                              },
+                              onReady: () {
+                                final state = ref.read(partyStateProvider);
+
+                                if (state.isPlaying) {
+                                  int startSeconds = 0;
+                                  final now =
+                                      DateTime.now().millisecondsSinceEpoch;
+
+                                  if (state.startedAt != null &&
+                                      now > state.startedAt!) {
+                                    startSeconds =
+                                        (now - state.startedAt!) ~/ 1000;
+                                  }
+
+                                  _controller!.seekTo(
+                                    Duration(seconds: startSeconds),
+                                  );
+                                  _controller!.play();
+                                }
+                              },
+                            ),
+                          ))
+                  : NeonEmptyState(isEndOfQueue: isEndOfQueue),
+            ),
+          ],
         ),
       ),
     );
 
     Widget reactions = Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
+      padding: const EdgeInsets.symmetric(horizontal: 12),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: ["🔥", "❤️", "🎉", "😂", "👋", "💃"].map((emoji) {
-          return GestureDetector(
+          return InkWell(
+            borderRadius: BorderRadius.circular(22),
             onTap: () => _sendReaction(emoji),
-            child: Container(
-              padding: const EdgeInsets.all(8),
-              decoration: const BoxDecoration(
-                color: Colors.white10,
-                shape: BoxShape.circle,
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 120),
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.08),
+                borderRadius: BorderRadius.circular(22),
               ),
-              child: Text(emoji, style: const TextStyle(fontSize: 24)),
+              child: Text(emoji, style: const TextStyle(fontSize: 22)),
             ),
           );
         }).toList(),
       ),
     );
 
-    Widget controls = Column(
-      children: [
-        if (!isHost)
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
-            child: Column(
-              children: [
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton.icon(
-                    icon: const Icon(Icons.thumbs_up_down_outlined),
-                    label: Text(
-                      partyState.partySize < 5
-                          ? "Need 5+ Users to Vote (Current: ${partyState.partySize})"
-                          : "Vote to Skip (${partyState.votesCount}/${partyState.votesRequired} from ${partyState.partySize})",
-                    ),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: partyState.partySize < 5
-                          ? Colors.grey
-                          : Colors.amber,
-                      foregroundColor: Colors.black,
-                    ),
-                    onPressed: partyState.partySize >= 5 ? _voteSkip : null,
-                  ),
-                ),
+    Widget guestControls(BuildContext context) {
+      final canVote = partyState.partySize >= 5;
+      final votes = partyState.votesCount;
+      final required = partyState.votesRequired;
 
-                const SizedBox(height: 12),
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton.icon(
-                    icon: const Icon(Icons.exit_to_app),
-                    label: const Text("LEAVE PARTY"),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.red.withValues(alpha: 0.4),
-                      foregroundColor: Colors.white,
-                    ),
-                    onPressed: _leaveParty,
-                  ),
+      final progress = required > 0 ? (votes / required).clamp(0.0, 1.0) : 0.0;
+
+      Color barColor;
+      if (!canVote) {
+        barColor = Colors.grey;
+      } else if (progress >= 1.0) {
+        barColor = Colors.greenAccent;
+      } else {
+        barColor = Colors.amber;
+      }
+
+      return Row(
+        children: [
+          // Vote Section
+          Expanded(
+            child: InkWell(
+              onTap: canVote ? _voteSkip : null,
+              borderRadius: BorderRadius.circular(16),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  vertical: 8,
+                  horizontal: 12,
                 ),
-              ],
-            ),
-          ),
-        if (isHost)
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 24),
-            child: Column(
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    IconButton(
-                      iconSize: 42,
-                      icon: const Icon(Icons.skip_previous),
-                      color: Colors.white,
-                      onPressed: partyState.currentIndex > 0
-                          ? _prevTrack
-                          : null,
+                    Text(
+                      "Vote to Skip",
+                      style: Theme.of(context).textTheme.labelLarge,
                     ),
-                    IconButton(
-                      iconSize: 56,
-                      icon: Icon(
-                        partyState.isPlaying
-                            ? Icons.pause_circle_filled
-                            : Icons.play_circle_fill,
+                    const SizedBox(height: 4),
+
+                    // Progress Bar
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: SizedBox(
+                        height: 6,
+                        child: TweenAnimationBuilder<double>(
+                          tween: Tween<double>(begin: 0, end: progress),
+                          duration: const Duration(milliseconds: 350),
+                          curve: Curves.easeOutCubic,
+                          builder: (context, value, _) {
+                            return LinearProgressIndicator(
+                              value: value,
+                              backgroundColor: Colors.white12,
+                              valueColor: AlwaysStoppedAnimation<Color>(
+                                barColor,
+                              ),
+                            );
+                          },
+                        ),
                       ),
-                      color: Theme.of(context).primaryColor,
-                      onPressed: partyState.isPlaying ? _pause : _resyncPlay,
                     ),
-                    IconButton(
-                      iconSize: 42,
-                      icon: const Icon(Icons.skip_next),
-                      color: Colors.white,
-                      onPressed:
-                          partyState.currentIndex < partyState.queue.length - 1
-                          ? _nextTrack
-                          : null,
+
+                    const SizedBox(height: 4),
+
+                    Text(
+                      canVote
+                          ? "$votes / $required votes"
+                          : "Need 5+ users (Now: ${partyState.partySize})",
+                      style: Theme.of(
+                        context,
+                      ).textTheme.labelSmall?.copyWith(color: Colors.white60),
                     ),
                   ],
                 ),
-                const SizedBox(height: 12),
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton.icon(
-                    icon: const Icon(Icons.stop_circle),
-                    label: const Text("END PARTY"),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.red,
-                      foregroundColor: Colors.white,
-                    ),
-                    onPressed: _endParty,
-                  ),
-                ),
-              ],
+              ),
             ),
           ),
-      ],
+
+          const SizedBox(width: 8),
+
+          // Leave Button
+          IconButton(
+            tooltip: "Leave Party",
+            icon: const Icon(Icons.exit_to_app),
+            color: Colors.redAccent,
+            onPressed: _leaveParty,
+          ),
+        ],
+      );
+    }
+
+    Widget hostControls(BuildContext context) {
+      return Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          IconButton(
+            tooltip: "Previous",
+            icon: const Icon(Icons.skip_previous),
+            iconSize: 34,
+            onPressed: partyState.currentIndex > 0 ? _prevTrack : null,
+          ),
+
+          IconButton(
+            tooltip: partyState.isPlaying ? "Pause" : "Play",
+            iconSize: 52,
+            icon: Icon(
+              partyState.isPlaying
+                  ? Icons.pause_circle_filled
+                  : Icons.play_circle_fill,
+            ),
+            color: Theme.of(context).primaryColor,
+            onPressed: partyState.isPlaying ? _pause : _resyncPlay,
+          ),
+
+          IconButton(
+            tooltip: "Next",
+            icon: const Icon(Icons.skip_next),
+            iconSize: 34,
+            onPressed: partyState.currentIndex < partyState.queue.length - 1
+                ? _nextTrack
+                : null,
+          ),
+
+          // End Party
+          IconButton(
+            tooltip: "End Party",
+            icon: const Icon(Icons.stop_circle),
+            color: Colors.redAccent,
+            onPressed: _endParty,
+          ),
+        ],
+      );
+    }
+
+    Widget controls = Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          // color: Colors.black.withOpacity(0.6),
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(color: Colors.white12),
+        ),
+        child: isHost ? hostControls(context) : guestControls(context),
+      ),
     );
 
     Widget searchBar = Container(
-      padding: const EdgeInsets.all(16),
-      // color: const Color(0xFF1E1E1E),
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
       color: Colors.transparent,
       child: Column(
         children: [
-          if (searchResults.isNotEmpty)
+          // ---- SEARCH RESULTS / EMPTY STATE ----
+          if (searchCtrl.text.isNotEmpty)
             Container(
-              constraints: const BoxConstraints(maxHeight: 150),
-              margin: const EdgeInsets.only(top: 8),
+              constraints: const BoxConstraints(maxHeight: 160),
+              margin: const EdgeInsets.only(bottom: 10),
               decoration: BoxDecoration(
-                color: Colors.transparent,
-                borderRadius: BorderRadius.circular(12),
+                color: Colors.white.withOpacity(0.04),
+                borderRadius: BorderRadius.circular(14),
               ),
-              child: ListView.builder(
-                shrinkWrap: true,
-                itemCount: searchResults.length,
-                itemBuilder: (_, i) {
-                  final video = searchResults[i];
-                  return ListTile(
-                    dense: true,
-                    leading: Image.network(
-                      video.thumbnails.lowResUrl,
-                      width: 30,
-                      fit: BoxFit.cover,
+              child: searchResults.isEmpty
+                  ? Center(
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        child: Text(
+                          "No videos found",
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.white.withOpacity(0.4),
+                            letterSpacing: 0.3,
+                          ),
+                        ),
+                      ),
+                    )
+                  : ListView.separated(
+                      shrinkWrap: true,
+                      itemCount: searchResults.length,
+                      separatorBuilder: (_, __) => Divider(
+                        height: 1,
+                        color: Colors.white.withOpacity(0.05),
+                      ),
+                      itemBuilder: (_, i) {
+                        final video = searchResults[i];
+                        return InkWell(
+                          onTap: () => _addVideo(video),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 8,
+                            ),
+                            child: Row(
+                              children: [
+                                // Thumbnail
+                                ClipRRect(
+                                  borderRadius: BorderRadius.circular(6),
+                                  child: Image.network(
+                                    video.thumbnails.lowResUrl,
+                                    width: 36,
+                                    height: 36,
+                                    fit: BoxFit.cover,
+                                  ),
+                                ),
+                                const SizedBox(width: 10),
+
+                                // Title
+                                Expanded(
+                                  child: Text(
+                                    video.title,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      fontSize: 12,
+                                      color: Colors.white70,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        );
+                      },
                     ),
-                    title: Text(
-                      video.title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 12),
-                    ),
-                    onTap: () => _addVideo(video),
-                  );
-                },
-              ),
             ),
 
-            TextField(
+          // ---- SEARCH INPUT ----
+          TextField(
             controller: searchCtrl,
             onChanged: _onSearchChanged,
             textInputAction: TextInputAction.search,
-            style: const TextStyle(color: Colors.white),
+            style: const TextStyle(color: Colors.white, fontSize: 13),
             decoration: InputDecoration(
-              hintText: "Search YouTube songs",
-              hintStyle: TextStyle(color: Colors.grey.shade400),
-              filled: true,
-              fillColor: Colors.white10,
-              contentPadding: const EdgeInsets.symmetric(
-                horizontal: 20,
-                vertical: 14,
+              hintText: "Search YouTube",
+              hintStyle: TextStyle(
+                color: Colors.white.withOpacity(0.4),
+                fontSize: 12,
               ),
-              prefixIcon: const Icon(Icons.search, color: Colors.grey),
+              filled: true,
+              fillColor: Colors.white.withOpacity(0.06),
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 16,
+                vertical: 12,
+              ),
+              prefixIcon: Icon(
+                Icons.search_rounded,
+                color: Colors.white.withOpacity(0.4),
+                size: 18,
+              ),
               border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(30),
+                borderRadius: BorderRadius.circular(24),
                 borderSide: BorderSide.none,
               ),
             ),
@@ -947,46 +1132,71 @@ class _PartyScreenState extends ConsumerState<PartyScreen>
       itemBuilder: (context, i) {
         final track = partyState.queue[i];
         final isCurrent = i == partyState.currentIndex;
+        final theme = Theme.of(context);
+
         return Padding(
           padding: const EdgeInsets.only(bottom: 8),
           child: GlassCard(
-            opacity: isCurrent ? 0.1 : 0.05,
-            borderRadius: BorderRadius.circular(12),
+            opacity: isCurrent ? 0.12 : 0.06,
+            borderRadius: BorderRadius.circular(14),
             child: ListTile(
               dense: true,
-              contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 14,
+                vertical: 6,
+              ),
+
+              // Leading: subtle playing indicator or index
               leading: isCurrent
                   ? Icon(
                       Icons.equalizer_rounded,
-                      color: Theme.of(context).primaryColor,
-                      size: 20,
+                      color: theme.primaryColor,
+                      size: 18,
                     )
                   : Text(
                       "${i + 1}",
-                      style: const TextStyle(color: Colors.white54),
+                      style: const TextStyle(
+                        color: Colors.white54,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w500,
+                      ),
                     ),
+
+              // Title
               title: Text(
                 track["title"],
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: isCurrent ? FontWeight.w600 : FontWeight.w500,
                   color: isCurrent ? Colors.white : Colors.white70,
                 ),
               ),
+
+              // Subtitle
               subtitle: Text(
-                "By ${track["addedBy"] ?? 'Unknown'}",
-                style: const TextStyle(color: Colors.white38, fontSize: 10),
+                "Added by ${track["addedBy"] ?? 'Unknown'}",
+                style: const TextStyle(
+                  color: Colors.white38,
+                  fontSize: 10,
+                  letterSpacing: 0.3,
+                ),
               ),
+
+              // Trailing action
               trailing: isHost
                   ? IconButton(
+                      splashRadius: 18,
                       icon: const Icon(
                         Icons.delete_outline,
                         color: Colors.white54,
-                        size: 20,
+                        size: 18,
                       ),
                       onPressed: () => _removeTrack(track["id"]),
                     )
                   : null,
+
               onTap: isHost ? () => _changeTrack(i) : null,
             ),
           ),
@@ -1000,38 +1210,60 @@ class _PartyScreenState extends ConsumerState<PartyScreen>
           child: partyState.messages.isEmpty
               ? Center(
                   child: Text(
-                    "Welcome to chat, Say hi!",
-                    style: TextStyle(color: Colors.white.withOpacity(0.3)),
+                    "Welcome to chat — say hi 👋",
+                    style: TextStyle(
+                      color: Colors.white.withOpacity(0.35),
+                      fontSize: 12,
+                      letterSpacing: 0.3,
+                    ),
                   ),
                 )
               : ListView.builder(
                   reverse: true,
-                  padding: const EdgeInsets.all(16),
+                  padding: const EdgeInsets.fromLTRB(16, 20, 16, 12),
                   itemCount: partyState.messages.length,
                   itemBuilder: (context, index) {
                     final msg = partyState
                         .messages[partyState.messages.length - 1 - index];
+
+                    // ---- SYSTEM MESSAGE ----
                     if (msg['type'] == 'system') {
                       return Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 8.0),
+                        padding: const EdgeInsets.symmetric(vertical: 10),
                         child: Center(
-                          child: Text(
-                            msg['text'] ?? "",
-                            style: TextStyle(
-                              color: Colors.white.withOpacity(0.5),
-                              fontSize: 11,
-                              fontStyle: FontStyle.italic,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 4,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withOpacity(0.05),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Text(
+                              msg['text'] ?? "",
+                              style: TextStyle(
+                                color: Colors.white.withOpacity(0.45),
+                                fontSize: 11,
+                                fontStyle: FontStyle.italic,
+                                letterSpacing: 0.3,
+                              ),
                             ),
                           ),
                         ),
                       );
                     }
+
                     final isMe = msg['senderId'] == socket.id;
+                    final theme = Theme.of(context);
+
                     return Align(
                       alignment: isMe
                           ? Alignment.centerRight
                           : Alignment.centerLeft,
-                      child: Container(
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 180),
+                        curve: Curves.easeOut,
                         margin: const EdgeInsets.symmetric(vertical: 4),
                         padding: const EdgeInsets.symmetric(
                           horizontal: 12,
@@ -1039,25 +1271,41 @@ class _PartyScreenState extends ConsumerState<PartyScreen>
                         ),
                         decoration: BoxDecoration(
                           color: isMe
-                              ? Theme.of(context).primaryColor.withOpacity(0.8)
-                              : Colors.white10,
-                          borderRadius: BorderRadius.circular(12),
+                              ? theme.primaryColor.withOpacity(0.85)
+                              : Colors.white.withOpacity(0.08),
+                          borderRadius: BorderRadius.only(
+                            topLeft: const Radius.circular(12),
+                            topRight: const Radius.circular(12),
+                            bottomLeft: Radius.circular(isMe ? 12 : 2),
+                            bottomRight: Radius.circular(isMe ? 2 : 12),
+                          ),
                         ),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
+                            // Username (only for others)
                             if (!isMe)
-                              Text(
-                                msg['username'] ?? "Guest",
-                                style: TextStyle(
-                                  color: Theme.of(context).primaryColor,
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.bold,
+                              Padding(
+                                padding: const EdgeInsets.only(bottom: 2),
+                                child: Text(
+                                  msg['username'] ?? "Guest",
+                                  style: TextStyle(
+                                    color: theme.primaryColor.withOpacity(0.9),
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w600,
+                                    letterSpacing: 0.3,
+                                  ),
                                 ),
                               ),
+
+                            // Message text
                             Text(
                               msg['text'] ?? "",
-                              style: const TextStyle(color: Colors.white),
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 13,
+                                height: 1.3,
+                              ),
                             ),
                           ],
                         ),
@@ -1066,31 +1314,40 @@ class _PartyScreenState extends ConsumerState<PartyScreen>
                   },
                 ),
         ),
+
+        // ---- INPUT BAR ----
         Padding(
-          padding: const EdgeInsets.all(8.0),
+          padding: const EdgeInsets.fromLTRB(12, 6, 12, 12),
           child: Row(
             children: [
               Expanded(
                 child: TextField(
                   controller: chatCtrl,
                   decoration: InputDecoration(
-                    hintText: "Send a message...",
+                    hintText: "Send a message…",
+                    hintStyle: TextStyle(
+                      color: Colors.white.withOpacity(0.4),
+                      fontSize: 12,
+                    ),
                     filled: true,
-                    fillColor: Colors.white10,
+                    fillColor: Colors.white.withOpacity(0.06),
                     border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(20),
+                      borderRadius: BorderRadius.circular(24),
                       borderSide: BorderSide.none,
                     ),
                     contentPadding: const EdgeInsets.symmetric(
                       horizontal: 16,
-                      vertical: 0,
+                      vertical: 10,
                     ),
                   ),
+                  style: const TextStyle(color: Colors.white, fontSize: 13),
                   onSubmitted: (_) => _sendMessage(),
                 ),
               ),
+              const SizedBox(width: 6),
               IconButton(
-                icon: const Icon(Icons.send),
+                splashRadius: 20,
+                icon: const Icon(Icons.send_rounded),
                 color: Theme.of(context).primaryColor,
                 onPressed: _sendMessage,
               ),
@@ -1164,8 +1421,30 @@ class _PartyScreenState extends ConsumerState<PartyScreen>
                               flex: 4,
                               child: Column(
                                 children: [
+                                  // ---- TAB BAR ----
                                   TabBar(
                                     controller: _tabController,
+                                    overlayColor: WidgetStateProperty.all(
+                                      Colors.transparent,
+                                    ),
+                                    indicatorSize: TabBarIndicatorSize.label,
+                                    indicatorWeight: 2,
+                                    indicatorColor: Theme.of(
+                                      context,
+                                    ).primaryColor.withOpacity(0.9),
+                                    labelColor: Colors.white,
+                                    unselectedLabelColor: Colors.white
+                                        .withOpacity(0.45),
+                                    labelStyle: const TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600,
+                                      letterSpacing: 0.6,
+                                    ),
+                                    unselectedLabelStyle: const TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w500,
+                                      letterSpacing: 0.4,
+                                    ),
                                     tabs: [
                                       const Tab(text: "QUEUE"),
                                       Tab(
@@ -1176,13 +1455,21 @@ class _PartyScreenState extends ConsumerState<PartyScreen>
                                             const Text("CHAT"),
                                             if (_unreadMessages > 0) ...[
                                               const SizedBox(width: 6),
-                                              Container(
-                                                padding: const EdgeInsets.all(
-                                                  6,
+                                              AnimatedContainer(
+                                                duration: const Duration(
+                                                  milliseconds: 200,
                                                 ),
-                                                decoration: const BoxDecoration(
-                                                  color: Colors.red,
-                                                  shape: BoxShape.circle,
+                                                padding:
+                                                    const EdgeInsets.symmetric(
+                                                      horizontal: 6,
+                                                      vertical: 2,
+                                                    ),
+                                                decoration: BoxDecoration(
+                                                  color: Theme.of(context)
+                                                      .primaryColor
+                                                      .withOpacity(0.9),
+                                                  borderRadius:
+                                                      BorderRadius.circular(10),
                                                 ),
                                                 child: Text(
                                                   _unreadMessages > 9
@@ -1192,7 +1479,7 @@ class _PartyScreenState extends ConsumerState<PartyScreen>
                                                   style: const TextStyle(
                                                     fontSize: 10,
                                                     color: Colors.white,
-                                                    fontWeight: FontWeight.bold,
+                                                    fontWeight: FontWeight.w600,
                                                   ),
                                                 ),
                                               ),
@@ -1201,10 +1488,11 @@ class _PartyScreenState extends ConsumerState<PartyScreen>
                                         ),
                                       ),
                                     ],
-                                    labelColor: Colors.white,
-                                    unselectedLabelColor: Colors.grey,
-                                    indicatorColor: Colors.purpleAccent,
                                   ),
+
+                                  const SizedBox(height: 6),
+
+                                  // ---- TAB CONTENT ----
                                   Expanded(
                                     child: TabBarView(
                                       controller: _tabController,
@@ -1229,94 +1517,126 @@ class _PartyScreenState extends ConsumerState<PartyScreen>
                   );
                 }
 
-                // Mobile Layout (Reactive)
+                // ---- MOBILE LAYOUT (REFINED) ----
                 return Column(
                   children: [
+                    // ---- CONNECTION STATUS BANNER ----
                     if (partyState.isDisconnected)
-                      Container(
+                      AnimatedContainer(
+                        duration: const Duration(milliseconds: 250),
                         width: double.infinity,
-                        color: Colors.redAccent,
-                        padding: const EdgeInsets.all(4),
+                        padding: const EdgeInsets.symmetric(vertical: 6),
+                        decoration: BoxDecoration(
+                          color: Colors.redAccent.withOpacity(0.9),
+                        ),
                         child: const Text(
-                          "Disconnected from server... Reconnecting...",
+                          "Reconnecting…",
                           textAlign: TextAlign.center,
-                          style: TextStyle(color: Colors.white, fontSize: 12),
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 11,
+                            letterSpacing: 0.3,
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
                       ),
-                    
-                    // Fixed Header (Always visible)
+
+                    // ---- FIXED HEADER ----
                     header,
 
-                    // Collapsible Player & Controls
+                    // ---- COLLAPSIBLE PLAYER ----
                     AnimatedSize(
-                      duration: const Duration(milliseconds: 300),
-                      curve: Curves.easeInOut,
-                      child: SizedBox(
-                        height: isKeyboardOpen ? 0 : null,
-                        child: SingleChildScrollView(
-                           physics: const NeverScrollableScrollPhysics(),
-                           child: Column(
-                              children: [
-                                Padding(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 16,
-                                  ),
-                                  child: player,
+                      duration: const Duration(milliseconds: 250),
+                      curve: Curves.easeOutCubic,
+                      child: AnimatedOpacity(
+                        duration: const Duration(milliseconds: 200),
+                        opacity: isKeyboardOpen ? 0 : 1,
+                        child: SizedBox(
+                          height: isKeyboardOpen ? 0 : null,
+                          child: Column(
+                            children: [
+                              Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 16,
                                 ),
-                                const SizedBox(height: 24),
-                                reactions,
-                                const SizedBox(height: 24),
-                                controls,
-                                const SizedBox(height: 24),
-                              ],
-                           ),
+                                child: player,
+                              ),
+                              const SizedBox(height: 10),
+                              reactions,
+                              const SizedBox(height: 10),
+                              controls,
+                              const SizedBox(height: 12),
+                            ],
+                          ),
                         ),
                       ),
                     ),
 
-                    // Tabs (Always visible)
+                    // ---- TABS ----
                     TabBar(
-                        controller: _tabController,
-                        tabs: [
-                          const Tab(text: "QUEUE"),
-                          Tab(
-                            child: Row(
-                              mainAxisAlignment:
-                                  MainAxisAlignment.center,
-                              children: [
-                                const Text("CHAT"),
-                                if (_unreadMessages > 0) ...[
-                                  const SizedBox(width: 6),
-                                  Container(
-                                    padding: const EdgeInsets.all(6),
-                                    decoration: const BoxDecoration(
-                                      color: Colors.red,
-                                      shape: BoxShape.circle,
-                                    ),
-                                    child: Text(
-                                      _unreadMessages > 9
-                                          ? "9+"
-                                          : _unreadMessages.toString(),
-                                      style: const TextStyle(
-                                        fontSize: 10,
-                                        color: Colors.white,
-                                        fontWeight: FontWeight.bold,
-                                      ),
+                      controller: _tabController,
+                      overlayColor: MaterialStateProperty.all(
+                        Colors.transparent,
+                      ),
+                      indicatorSize: TabBarIndicatorSize.label,
+                      indicatorWeight: 2,
+                      indicatorColor: Theme.of(
+                        context,
+                      ).primaryColor.withOpacity(0.9),
+                      labelColor: Colors.white,
+                      unselectedLabelColor: Colors.white.withOpacity(0.45),
+                      labelStyle: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: 0.6,
+                      ),
+                      unselectedLabelStyle: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
+                        letterSpacing: 0.4,
+                      ),
+                      tabs: [
+                        const Tab(text: "QUEUE"),
+                        Tab(
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              const Text("CHAT"),
+                              if (_unreadMessages > 0) ...[
+                                const SizedBox(width: 6),
+                                AnimatedContainer(
+                                  duration: const Duration(milliseconds: 200),
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 6,
+                                    vertical: 2,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: Theme.of(
+                                      context,
+                                    ).primaryColor.withOpacity(0.9),
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                  child: Text(
+                                    _unreadMessages > 9
+                                        ? "9+"
+                                        : _unreadMessages.toString(),
+                                    style: const TextStyle(
+                                      fontSize: 10,
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.w600,
                                     ),
                                   ),
-                                ],
+                                ),
                               ],
-                            ),
+                            ],
                           ),
-                        ],
-                        labelColor: Colors.white,
-                        unselectedLabelColor: Theme.of(
-                          context,
-                        ).disabledColor,
-                        indicatorColor: Theme.of(context).primaryColor,
-                      ),
-                    
-                    // Expanded Tab View (Takes remaining space)
+                        ),
+                      ],
+                    ),
+
+                    const SizedBox(height: 6),
+
+                    // ---- TAB CONTENT ----
                     Expanded(
                       child: TabBarView(
                         controller: _tabController,
@@ -1341,5 +1661,3 @@ class _PartyScreenState extends ConsumerState<PartyScreen>
     );
   }
 }
-// Remove _SliverAppBarDelegate as it is no longer used
-

@@ -1,0 +1,17 @@
+- (Done) add safe area to waiting screen.
+- (Done) Kicked users have cool down time of 5 minutes to enter a party again. 3 chances, if they got kicked out of a party for 3 times, they're restricted to it. they can't join (not even with a new name).
+- (Done) User issue 1: User said, he hosted a party, added songs, started the party, clicked on share and it opens share panel, from thier he shared the code to his friends group. and asked them to join the
+party and it tooks around 1-2 minutes. when he's back to app, the app is lagged, he doesn't got that admin privilages instantly. nothing on the screen is responding except the music player is playing contiously.
+He needed a quick restart to get access to that screen and to get back controls to working again. some times it keeps saying reconecting.... and sometimes timout. in this case, navigating back and forth in screens
+also doesn't helps, only a restart can. We need to work on this.
+- (Done) A user requested to also include a party code in the share text. like 
+ShareParams(
+        text: "Join my music party on Sync Music! Click here: $link",
+        subject: "Join Sync Music Party",
+      ),
+
+instead of this, they need something like
+text: Join my music party on Sync Music! use CODE: $code.
+ Or You can directly click on this $link here to join.
+
+- (Done) Prevent users from adding duplicate songs to the queue.

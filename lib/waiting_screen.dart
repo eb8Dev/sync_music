@@ -13,6 +13,7 @@ import 'package:youtube_explode_dart/youtube_explode_dart.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:youtube_player_flutter/youtube_player_flutter.dart';
 
 class WaitingScreen extends ConsumerStatefulWidget {
   final Map<String, dynamic> party;
@@ -40,6 +41,20 @@ class _WaitingScreenState extends ConsumerState<WaitingScreen> {
     // Initialize the party state provider with initial data
     WidgetsBinding.instance.addPostFrameCallback((_) {
       ref.read(partyStateProvider.notifier).init(widget.party);
+
+      // If party is already playing, navigate to PartyScreen immediately
+      if (widget.party["isPlaying"] == true) {
+        final userState = ref.read(userProvider);
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (_) => PartyScreen(
+              party: widget.party,
+              username: "${userState.avatar} ${userState.username}",
+            ),
+          ),
+        );
+      }
     });
   }
 
@@ -81,7 +96,8 @@ class _WaitingScreenState extends ConsumerState<WaitingScreen> {
     final link = "$serverUrl/join/${widget.party["id"]}";
     SharePlus.instance.share(
       ShareParams(
-        text: "Join my music party on Sync Music! Click here: $link",
+        text:
+            "Join my music party on Sync Music! use CODE: ${widget.party["id"]}.\nOr You can directly click on this $link to join.",
         subject: "Join Sync Music Party",
       ),
     );
@@ -119,7 +135,41 @@ class _WaitingScreenState extends ConsumerState<WaitingScreen> {
     });
   }
 
-  void _addVideo(Video video) {
+  Future<void> _addVideo(Video video) async {
+    setState(() => isSearching = true);
+    final isPlayable = await _ytService.isVideoPlayable(video.id.value);
+    setState(() => isSearching = false);
+
+    if (!mounted) return;
+
+    if (!isPlayable) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            "Cannot add this video (Age Restricted or Unavailable).",
+          ),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
+    // Check for duplicates
+    final currentQueue = ref.read(partyStateProvider).queue;
+    final isDuplicate = currentQueue.any((track) {
+      final trackId = YoutubePlayer.convertUrlToId(track['url']);
+      return trackId == video.id.value;
+    });
+    if (isDuplicate) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("This song is already in the queue!"),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
     ref.read(partyStateProvider.notifier).addTrack(widget.party["id"], {
       "url": video.url,
       "title": video.title,
@@ -128,19 +178,12 @@ class _WaitingScreenState extends ConsumerState<WaitingScreen> {
     searchCtrl.clear();
     setState(() => searchResults = []);
     FocusScope.of(context).unfocus();
-    
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text("Added '${video.title}' to queue"),
-        behavior: SnackBarBehavior.floating,
-        backgroundColor: Colors.green,
-        duration: const Duration(seconds: 2),
-      ),
-    );
   }
 
   void _startParty() {
-    ref.read(partyStateProvider.notifier).play(widget.party["id"]);
+    ref
+        .read(partyStateProvider.notifier)
+        .initiateCountdown(widget.party["id"], widget.username);
   }
 
   void _copyCode() {
@@ -173,6 +216,8 @@ class _WaitingScreenState extends ConsumerState<WaitingScreen> {
 
     return Scaffold(
       appBar: AppBar(
+        surfaceTintColor: Colors.transparent,
+        scrolledUnderElevation: 0,
         title: InkWell(
           onTap: _copyCode,
           child: Row(
@@ -200,191 +245,243 @@ class _WaitingScreenState extends ConsumerState<WaitingScreen> {
           ),
         ],
       ),
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [Color(0xFF121212), Color(0xFF1E1E1E)],
-          ),
-        ),
-        child: Column(
-          children: [
-            const SizedBox(height: 16),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 24),
-              child: GlassCard(
-                opacity: 0.05,
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Row(
-                    children: [
-                      Icon(
-                        isHost ? Icons.local_activity : Icons.headset,
-                        color: Theme.of(context).primaryColor,
-                      ),
-                      const SizedBox(width: 16),
-                      Text(
-                        isHost ? "YOU ARE HOST" : "WAITING FOR HOST TO START",
-                        style: const TextStyle(
-                          fontWeight: FontWeight.bold,
-                          letterSpacing: 1.2,
-                        ),
-                      ),
-                    ],
-                  ),
+      body: Stack(
+        children: [
+          SafeArea(
+            child: Container(
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [Color(0xFF121212), Color(0xFF1E1E1E)],
                 ),
               ),
-            ),
-
-            // Simplified logs for now, using the messages from provider if they are system type
-            if (partyState.messages.any((m) => m['type'] == 'system'))
-              Container(
-                height: 100,
-                margin: const EdgeInsets.symmetric(
-                  horizontal: 24,
-                  vertical: 12,
-                ),
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: Colors.black12,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: ListView(
-                  reverse: true,
-                  children: partyState.messages
-                      .where((m) => m['type'] == 'system')
-                      .toList()
-                      .reversed
-                      .map(
-                        (m) => Text(
-                          m['text'] ?? "",
-                          style: const TextStyle(
-                            color: Colors.white54,
-                            fontSize: 12,
-                          ),
-                        ),
-                      )
-                      .toList(),
-                ),
-              ),
-
-            const SizedBox(height: 12),
-            Expanded(
-              child: partyState.queue.isEmpty
-                  ? Center(
-                      child: Text(
-                        "Queue is empty",
-                        style: TextStyle(color: Colors.white.withOpacity(0.3)),
-                      ),
-                    )
-                  : ListView.builder(
-                      padding: const EdgeInsets.symmetric(horizontal: 24),
-                      itemCount: partyState.queue.length,
-                      itemBuilder: (_, i) {
-                        final track = partyState.queue[i];
-                        return Padding(
-                          padding: const EdgeInsets.only(bottom: 8),
-                          child: GlassCard(
-                            opacity: 0.05,
-                            borderRadius: BorderRadius.circular(12),
-                            child: ListTile(
-                              dense: true,
-                              leading: Text(
-                                "${i + 1}",
-                                style: const TextStyle(color: Colors.white54),
-                              ),
-                              title: Text(
-                                track["title"],
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                              subtitle: Text(
-                                "By ${track["addedBy"] ?? 'Unknown'}",
-                                style: TextStyle(
-                                  color: Theme.of(context).primaryColor,
-                                  fontSize: 10,
-                                ),
-                              ),
-                            ),
-                          ),
-                        );
-                      },
-                    ),
-            ),
-            Container(
-              padding: const EdgeInsets.all(16),
-              color: const Color(0xFF121212),
               child: Column(
                 children: [
-                  TextField(
-                    controller: searchCtrl,
-                    onChanged: _onSearchChanged,
-                    decoration: InputDecoration(
-                      hintText: "Search YouTube songs...",
-                      prefixIcon: const Icon(Icons.search),
-                      suffixIcon: isSearching
-                          ? const SizedBox(
-                              width: 20,
-                              height: 20,
-                              child: Padding(
-                                padding: EdgeInsets.all(10),
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
+                  const SizedBox(height: 16),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 24),
+                    child: GlassCard(
+                      opacity: 0.05,
+                      child: Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: Row(
+                          children: [
+                            Icon(
+                              isHost ? Icons.local_activity : Icons.headset,
+                              color: Theme.of(context).primaryColor,
+                            ),
+                            const SizedBox(width: 16),
+                            Text(
+                              isHost
+                                  ? "YOU ARE HOST"
+                                  : "WAITING FOR HOST TO START",
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                letterSpacing: 1.2,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+
+                  // Simplified logs for now, using the messages from provider if they are system type
+                  if (partyState.messages.any((m) => m['type'] == 'system'))
+                    Container(
+                      height: 100,
+                      margin: const EdgeInsets.symmetric(
+                        horizontal: 24,
+                        vertical: 12,
+                      ),
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: Colors.black12,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: ListView(
+                        reverse: true,
+                        children: partyState.messages
+                            .where((m) => m['type'] == 'system')
+                            .toList()
+                            .reversed
+                            .map(
+                              (m) => Text(
+                                m['text'] ?? "",
+                                style: const TextStyle(
+                                  color: Colors.white54,
+                                  fontSize: 12,
                                 ),
                               ),
                             )
-                          : null,
+                            .toList(),
+                      ),
+                    ),
+
+                  const SizedBox(height: 12),
+                  Expanded(
+                    child: partyState.queue.isEmpty
+                        ? Center(
+                            child: Text(
+                              "Queue is empty",
+                              style: TextStyle(
+                                color: Colors.white.withValues(alpha: 0.3),
+                              ),
+                            ),
+                          )
+                        : ListView.builder(
+                            padding: const EdgeInsets.symmetric(horizontal: 24),
+                            itemCount: partyState.queue.length,
+                            itemBuilder: (_, i) {
+                              final track = partyState.queue[i];
+                              return Padding(
+                                padding: const EdgeInsets.only(bottom: 8),
+                                child: GlassCard(
+                                  opacity: 0.05,
+                                  borderRadius: BorderRadius.circular(12),
+                                  child: ListTile(
+                                    dense: true,
+                                    leading: Text(
+                                      "${i + 1}",
+                                      style: const TextStyle(
+                                        color: Colors.white54,
+                                      ),
+                                    ),
+                                    title: Text(
+                                      track["title"],
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                    subtitle: Text(
+                                      "By ${track["addedBy"] ?? 'Unknown'}",
+                                      style: TextStyle(
+                                        color: Theme.of(context).primaryColor,
+                                        fontSize: 10,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    color: const Color(0xFF121212),
+                    child: Column(
+                      children: [
+                        TextField(
+                          controller: searchCtrl,
+                          onChanged: _onSearchChanged,
+                          decoration: InputDecoration(
+                            hintText: "Search YouTube songs...",
+                            prefixIcon: const Icon(Icons.search),
+                            suffixIcon: isSearching
+                                ? const SizedBox(
+                                    width: 20,
+                                    height: 20,
+                                    child: Padding(
+                                      padding: EdgeInsets.all(10),
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                      ),
+                                    ),
+                                  )
+                                : null,
+                          ),
+                        ),
+                        if (searchResults.isNotEmpty)
+                          Container(
+                            constraints: const BoxConstraints(maxHeight: 200),
+                            margin: const EdgeInsets.only(top: 8),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF1E1E1E),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: ListView.separated(
+                              shrinkWrap: true,
+                              itemCount: searchResults.length,
+                              separatorBuilder: (_, __) => const Divider(
+                                height: 1,
+                                color: Colors.white10,
+                              ),
+                              itemBuilder: (_, i) {
+                                final video = searchResults[i];
+                                return ListTile(
+                                  leading: Image.network(
+                                    video.thumbnails.lowResUrl,
+                                    width: 40,
+                                    fit: BoxFit.cover,
+                                  ),
+                                  title: Text(
+                                    video.title,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(fontSize: 12),
+                                  ),
+                                  onTap: () => _addVideo(video),
+                                );
+                              },
+                            ),
+                          ),
+                        if (isHost) ...[
+                          const SizedBox(height: 16),
+                          SizedBox(
+                            width: double.infinity,
+                            child: ElevatedButton.icon(
+                              icon: const Icon(Icons.play_arrow),
+                              label: const Text("START PARTY"),
+                              onPressed: _startParty,
+                            ),
+                          ),
+                        ],
+                      ],
                     ),
                   ),
-                  if (searchResults.isNotEmpty)
-                    Container(
-                      constraints: const BoxConstraints(maxHeight: 200),
-                      margin: const EdgeInsets.only(top: 8),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF1E1E1E),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: ListView.separated(
-                        shrinkWrap: true,
-                        itemCount: searchResults.length,
-                        separatorBuilder: (_, __) =>
-                            const Divider(height: 1, color: Colors.white10),
-                        itemBuilder: (_, i) {
-                          final video = searchResults[i];
-                          return ListTile(
-                            leading: Image.network(
-                              video.thumbnails.lowResUrl,
-                              width: 40,
-                              fit: BoxFit.cover,
-                            ),
-                            title: Text(
-                              video.title,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(fontSize: 12),
-                            ),
-                            onTap: () => _addVideo(video),
-                          );
-                        },
-                      ),
-                    ),
-                  if (isHost) ...[
-                    const SizedBox(height: 16),
-                    SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton.icon(
-                        icon: const Icon(Icons.play_arrow),
-                        label: const Text("START PARTY"),
-                        onPressed: _startParty,
-                      ),
-                    ),
-                  ],
                 ],
               ),
             ),
-          ],
-        ),
+          ),
+          if (partyState.countdown != null)
+            Container(
+              color: Colors.black.withValues(alpha: 0.85),
+              alignment: Alignment.center,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text(
+                    "Starting in",
+                    style: TextStyle(
+                      color: Colors.white70,
+                      fontSize: 24,
+                      letterSpacing: 1.5,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  TweenAnimationBuilder<double>(
+                    key: ValueKey(partyState.countdown),
+                    tween: Tween(begin: 1.5, end: 1.0),
+                    duration: const Duration(milliseconds: 400),
+                    curve: Curves.easeOutBack,
+                    builder: (context, value, child) {
+                      return Transform.scale(
+                        scale: value,
+                        child: Text(
+                          "${partyState.countdown}",
+                          style: TextStyle(
+                            color: Theme.of(context).primaryColor,
+                            fontSize: 120,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ],
+              ),
+            ),
+        ],
       ),
     );
   }

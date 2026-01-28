@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:socket_io_client/socket_io_client.dart' as IO;
@@ -15,6 +16,7 @@ class DetailedPartyState {
   final int votesCount;
   final int votesRequired;
   final bool isDisconnected;
+  final int? countdown;
 
   const DetailedPartyState({
     this.queue = const [],
@@ -28,6 +30,7 @@ class DetailedPartyState {
     this.votesCount = 0,
     this.votesRequired = 0,
     this.isDisconnected = false,
+    this.countdown,
   });
 
   DetailedPartyState copyWith({
@@ -42,6 +45,8 @@ class DetailedPartyState {
     int? votesCount,
     int? votesRequired,
     bool? isDisconnected,
+    int? countdown,
+    bool clearCountdown = false,
   }) {
     return DetailedPartyState(
       queue: queue ?? this.queue,
@@ -55,6 +60,7 @@ class DetailedPartyState {
       votesCount: votesCount ?? this.votesCount,
       votesRequired: votesRequired ?? this.votesRequired,
       isDisconnected: isDisconnected ?? this.isDisconnected,
+      countdown: clearCountdown ? null : (countdown ?? this.countdown),
     );
   }
 }
@@ -71,6 +77,7 @@ class PartyScreenNotifier extends Notifier<DetailedPartyState> {
   }
 
   void init(Map<String, dynamic> initialData) {
+    _cleanupListeners(); // Remove any existing listeners first
     state = DetailedPartyState(
       queue: List.from(initialData["queue"] ?? []),
       currentIndex: initialData["currentIndex"] ?? 0,
@@ -85,78 +92,120 @@ class PartyScreenNotifier extends Notifier<DetailedPartyState> {
     _setupListeners();
   }
 
+  void _cleanupListeners() {
+    _socket.off("QUEUE_UPDATED", _onQueueUpdated);
+    _socket.off("PLAYBACK_UPDATE", _onPlaybackUpdate);
+    _socket.off("SYNC", _onSync);
+    _socket.off("PARTY_SIZE", _onPartySize);
+    _socket.off("VOTE_UPDATE", _onVoteUpdate);
+    _socket.off("CHAT_MESSAGE", _onChatMessage);
+    _socket.off("INFO", _onInfo);
+    _socket.off("MEMBERS_LIST", _onMembersList);
+    _socket.off("THEME_UPDATE", _onThemeUpdate);
+    _socket.off("HOST_UPDATE", _onHostUpdate);
+    // Note: Disconnect/Connect handlers are tricky with Socket.IO client dart 
+    // as it doesn't support named handler removal for built-in events easily
+    // without exact reference, but our main issue is custom events.
+    // For now, we leave connect/disconnect as they just update a bool flag.
+  }
+
   void _setupListeners() {
-    _socket.on("QUEUE_UPDATED", (data) {
-      final newQueue = List.from(data);
-      if (newQueue.length > state.queue.length) {
-         final newTrack = newQueue.last;
-         _addSystemMessage("${newTrack['addedBy'] ?? 'Someone'} added '${newTrack['title']}'");
-      }
-      state = state.copyWith(queue: newQueue);
-    });
+    _socket.on("QUEUE_UPDATED", _onQueueUpdated);
+    _socket.on("PLAYBACK_UPDATE", _onPlaybackUpdate);
+    _socket.on("SYNC", _onSync);
+    _socket.on("PARTY_SIZE", _onPartySize);
+    _socket.on("VOTE_UPDATE", _onVoteUpdate);
+    _socket.on("CHAT_MESSAGE", _onChatMessage);
+    _socket.on("INFO", _onInfo);
+    _socket.on("MEMBERS_LIST", _onMembersList);
+    _socket.on("THEME_UPDATE", _onThemeUpdate);
+    _socket.on("HOST_UPDATE", _onHostUpdate);
 
-    _socket.on("PLAYBACK_UPDATE", (data) {
-      state = state.copyWith(
-        isPlaying: data["isPlaying"] == true,
-        currentIndex: data["currentIndex"] ?? state.currentIndex,
-        startedAt: (data["startedAt"] as num?)?.toInt(),
-      );
-    });
-
-    _socket.on("SYNC", (data) {
-      // Sync events are usually handled by the player controller directly or to trigger a state update if drift is too much.
-      // For now, let's just update the startedAt/index if different.
-       if (data["currentIndex"] != state.currentIndex) {
-          state = state.copyWith(
-            currentIndex: data["currentIndex"],
-            startedAt: (data["startedAt"] as num?)?.toInt(),
-          );
-       }
-    });
-
-    _socket.on("PARTY_SIZE", (data) {
-      state = state.copyWith(partySize: data["size"] ?? 1);
-    });
-
-    _socket.on("VOTE_UPDATE", (data) {
-      state = state.copyWith(
-        votesCount: data["votes"] ?? 0,
-        votesRequired: data["required"] ?? 0,
-      );
-    });
-
-    _socket.on("CHAT_MESSAGE", (data) {
-      final msg = {...Map<String, dynamic>.from(data), 'type': 'user'};
-      state = state.copyWith(messages: [...state.messages, msg]);
-    });
-
-    _socket.on("INFO", (msg) {
-      _addSystemMessage(msg.toString());
-    });
-
-    _socket.on("MEMBERS_LIST", (data) {
-      try {
-        state = state.copyWith(members: List<Map<String, dynamic>>.from(data));
-      } catch (e) {
-        debugPrint("Error parsing members list: $e");
-      }
-    });
-
-    _socket.on("THEME_UPDATE", (data) {
-      state = state.copyWith(themeIndex: data["themeIndex"] ?? 0);
-    });
-
-    _socket.on("HOST_UPDATE", (data) {
-      final newHostId = data["hostId"];
-      final updatedMembers = state.members.map((m) {
-        return {...m, 'isHost': m['id'] == newHostId};
-      }).toList();
-      state = state.copyWith(members: updatedMembers);
-      _addSystemMessage("Host has changed!");
-    });
-
+    // Prevent duplicate connection listeners by checking (if possible) or just accepting
+    // that these simple bool toggles are less harmful if duplicated.
     _socket.onDisconnect((_) => state = state.copyWith(isDisconnected: true));
     _socket.onConnect((_) => state = state.copyWith(isDisconnected: false));
+  }
+
+  // ---- Handlers ----
+
+  void _onQueueUpdated(data) {
+    final newQueue = List.from(data);
+    if (newQueue.length > state.queue.length) {
+       final newTrack = newQueue.last;
+       _addSystemMessage("${newTrack['addedBy'] ?? 'Someone'} added '${newTrack['title']}'");
+    }
+    state = state.copyWith(queue: newQueue);
+  }
+
+  void _onPlaybackUpdate(data) {
+    state = state.copyWith(
+      isPlaying: data["isPlaying"] == true,
+      currentIndex: data["currentIndex"] ?? state.currentIndex,
+      startedAt: (data["startedAt"] as num?)?.toInt(),
+    );
+  }
+
+  void _onSync(data) {
+     if (data["currentIndex"] != state.currentIndex) {
+        state = state.copyWith(
+          currentIndex: data["currentIndex"],
+          startedAt: (data["startedAt"] as num?)?.toInt(),
+        );
+     }
+  }
+
+  void _onPartySize(data) {
+    state = state.copyWith(partySize: data["size"] ?? 1);
+  }
+
+  void _onVoteUpdate(data) {
+    state = state.copyWith(
+      votesCount: data["votes"] ?? 0,
+      votesRequired: data["required"] ?? 0,
+    );
+  }
+
+  void _onChatMessage(data) {
+    debugPrint("Chat message received: $data");
+    final text = (data['message'] ?? data['text']) as String?;
+    
+    if (text == "##COUNTDOWN##") {
+       debugPrint("Countdown signal received!");
+       // Only start if not already counting down
+       if (state.countdown == null) {
+          _runCountdownLogic(isHost: false);
+       }
+       return; 
+    }
+
+    final msg = {...Map<String, dynamic>.from(data), 'type': 'user'};
+    state = state.copyWith(messages: [...state.messages, msg]);
+  }
+
+  void _onInfo(msg) {
+    _addSystemMessage(msg.toString());
+  }
+
+  void _onMembersList(data) {
+    try {
+      state = state.copyWith(members: List<Map<String, dynamic>>.from(data));
+    } catch (e) {
+      debugPrint("Error parsing members list: $e");
+    }
+  }
+
+  void _onThemeUpdate(data) {
+    state = state.copyWith(themeIndex: data["themeIndex"] ?? 0);
+  }
+
+  void _onHostUpdate(data) {
+    final newHostId = data["hostId"];
+    final updatedMembers = state.members.map((m) {
+      return {...m, 'isHost': m['id'] == newHostId};
+    }).toList();
+    state = state.copyWith(members: updatedMembers);
+    _addSystemMessage("Host has changed!");
   }
 
   void _addSystemMessage(String text) {
@@ -169,6 +218,22 @@ class PartyScreenNotifier extends Notifier<DetailedPartyState> {
     state = state.copyWith(messages: [...state.messages, msg]);
   }
 
+  void _runCountdownLogic({required bool isHost, String? partyId}) {
+    state = state.copyWith(countdown: 5);
+    Timer.periodic(const Duration(seconds: 1), (timer) {
+      final current = state.countdown ?? 0;
+      if (current <= 1) {
+        timer.cancel();
+        state = state.copyWith(clearCountdown: true);
+        if (isHost && partyId != null) {
+           play(partyId);
+        }
+      } else {
+        state = state.copyWith(countdown: current - 1);
+      }
+    });
+  }
+
   // Actions
   void addTrack(String partyId, dynamic track) {
     _socket.emit("ADD_TRACK", {"partyId": partyId, "track": track});
@@ -176,6 +241,11 @@ class PartyScreenNotifier extends Notifier<DetailedPartyState> {
 
   void play(String partyId) {
     _socket.emit("PLAY", {"partyId": partyId});
+  }
+
+  void initiateCountdown(String partyId, String username) {
+    sendMessage(partyId, "##COUNTDOWN##", username);
+    _runCountdownLogic(isHost: true, partyId: partyId);
   }
 
   void pause(String partyId) {

@@ -1,23 +1,130 @@
+import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:sync_music/services/support_service.dart';
-import 'package:sync_music/support_screen.dart'; // Import SupportScreen
+import 'package:sync_music/support_screen.dart';
 import 'package:sync_music/widgets/glass_card.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-class SettingsDialog extends StatelessWidget {
+class SettingsDialog extends StatefulWidget {
   const SettingsDialog({super.key});
+
+  @override
+  State<SettingsDialog> createState() => _SettingsDialogState();
+}
+
+class _SettingsDialogState extends State<SettingsDialog> {
+  final SupportService _supportService = SupportService();
+
+  String _version = "—";
+  String _packageName = "—";
+  String _installer = "—";
+  int _tapCount = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadAppInfo();
+  }
+
+  Future<void> _loadAppInfo() async {
+    final info = await PackageInfo.fromPlatform();
+
+    setState(() {
+      _version = "${info.version} (${info.buildNumber})";
+      _packageName = info.packageName;
+      _installer = info.installerStore?.isNotEmpty == true
+          ? info.installerStore!
+          : "Unknown / APK";
+    });
+  }
 
   Future<void> _launchLegalUrl(String url) async {
     final Uri uri = Uri.parse(url);
-    if (!await launchUrl(uri)) {
+    if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
       debugPrint("Could not launch $url");
     }
   }
 
+  void _handleRateUs(BuildContext context) {
+    Navigator.pop(context);
+
+    // Delay avoids "noContextOrActivity"
+    Future.delayed(const Duration(milliseconds: 500), () {
+      _supportService.requestReview();
+    });
+  }
+
+  void _onVersionTap() {
+    _tapCount++;
+    if (_tapCount >= 7) {
+      _tapCount = 0;
+      _showDebugSheet();
+    }
+  }
+
+  void _showDebugSheet() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (_) {
+        return SafeArea(
+          child: GlassCard(
+            borderRadius: BorderRadius.circular(20),
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    "DEBUG INFO",
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 1.2,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+
+                  _DebugRow("Package", _packageName),
+                  _DebugRow("Version", _version),
+                  _DebugRow("Installer", _installer),
+                  _DebugRow(
+                    "Build Mode",
+                    kReleaseMode
+                        ? "Release"
+                        : kProfileMode
+                        ? "Profile"
+                        : "Debug",
+                  ),
+                  _DebugRow(
+                    "Platform",
+                    "${Platform.operatingSystem} ${Platform.operatingSystemVersion}",
+                  ),
+
+                  const SizedBox(height: 16),
+
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton(
+                      onPressed: () => Navigator.pop(context),
+                      child: const Text("Close"),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final supportService = SupportService();
-
     return Dialog(
       backgroundColor: Colors.transparent,
       child: GlassCard(
@@ -27,6 +134,7 @@ class SettingsDialog extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
+              // ---- HEADER ----
               const Text(
                 "SETTINGS & SUPPORT",
                 style: TextStyle(
@@ -36,7 +144,10 @@ class SettingsDialog extends StatelessWidget {
                   letterSpacing: 1.5,
                 ),
               ),
+
               const SizedBox(height: 24),
+
+              // ---- SUPPORT ----
               _SettingsTile(
                 icon: Icons.support_agent,
                 title: "Contact Support",
@@ -49,17 +160,19 @@ class SettingsDialog extends StatelessWidget {
                   );
                 },
               ),
+
               const SizedBox(height: 16),
+
               _SettingsTile(
                 icon: Icons.star_rate_rounded,
                 title: "Rate Us",
                 subtitle: "Love the app? Let us know!",
-                onTap: () {
-                  Navigator.pop(context);
-                  supportService.requestReview();
-                },
+                onTap: () => _handleRateUs(context),
               ),
+
               const SizedBox(height: 24),
+
+              // ---- LEGAL ----
               const Align(
                 alignment: Alignment.centerLeft,
                 child: Text(
@@ -72,26 +185,45 @@ class SettingsDialog extends StatelessWidget {
                   ),
                 ),
               ),
+
               const SizedBox(height: 8),
+
               _SettingsTile(
                 icon: Icons.description_outlined,
                 title: "Terms of Service",
                 subtitle: "Read our terms",
-                onTap: () => _launchLegalUrl("https://sites.google.com/view/termsofservice-syncmusic/home"),
+                onTap: () => _launchLegalUrl(
+                  "https://sites.google.com/view/termsofservice-syncmusic/home",
+                ),
               ),
+
               const SizedBox(height: 8),
+
               _SettingsTile(
                 icon: Icons.privacy_tip_outlined,
                 title: "Privacy Policy",
                 subtitle: "How we use your data",
-                onTap: () => _launchLegalUrl("https://sites.google.com/view/privacypolicy-syncmusic/home"),
+                onTap: () => _launchLegalUrl(
+                  "https://sites.google.com/view/privacypolicy-syncmusic/home",
+                ),
               ),
+
               const SizedBox(height: 24),
-              Text(
-                "Version 1.0.0",
-                style: TextStyle(color: Colors.white.withOpacity(0.3), fontSize: 12),
+
+              // ---- VERSION (TAP 7x) ----
+              GestureDetector(
+                onTap: _onVersionTap,
+                child: Text(
+                  "Version $_version",
+                  style: TextStyle(
+                    color: Colors.white.withOpacity(0.3),
+                    fontSize: 12,
+                  ),
+                ),
               ),
-              const SizedBox(height: 8),
+
+              const SizedBox(height: 12),
+
               TextButton(
                 onPressed: () => Navigator.pop(context),
                 child: const Text("Close"),
@@ -103,6 +235,8 @@ class SettingsDialog extends StatelessWidget {
     );
   }
 }
+
+// ------------------------------------------------------------
 
 class _SettingsTile extends StatelessWidget {
   final IconData icon;
@@ -166,6 +300,44 @@ class _SettingsTile extends StatelessWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+// ------------------------------------------------------------
+
+class _DebugRow extends StatelessWidget {
+  final String label;
+  final String value;
+
+  const _DebugRow(this.label, this.value);
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 90,
+            child: Text(
+              label,
+              style: TextStyle(
+                color: Colors.white.withOpacity(0.5),
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+          Expanded(
+            child: SelectableText(
+              value,
+              style: const TextStyle(color: Colors.white, fontSize: 12),
+            ),
+          ),
+        ],
       ),
     );
   }
