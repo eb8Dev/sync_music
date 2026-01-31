@@ -7,14 +7,14 @@ import 'package:sync_music/support_screen.dart';
 import 'package:sync_music/widgets/glass_card.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-class SettingsDialog extends StatefulWidget {
-  const SettingsDialog({super.key});
+class SettingsScreen extends StatefulWidget {
+  const SettingsScreen({super.key});
 
   @override
-  State<SettingsDialog> createState() => _SettingsDialogState();
+  State<SettingsScreen> createState() => _SettingsScreenState();
 }
 
-class _SettingsDialogState extends State<SettingsDialog> {
+class _SettingsScreenState extends State<SettingsScreen> {
   final SupportService _supportService = SupportService();
 
   String _version = "—";
@@ -47,13 +47,8 @@ class _SettingsDialogState extends State<SettingsDialog> {
     }
   }
 
-  void _handleRateUs(BuildContext context) {
-    Navigator.pop(context);
-
-    // Delay avoids "noContextOrActivity"
-    Future.delayed(const Duration(milliseconds: 500), () {
-      _supportService.requestReview();
-    });
+  void _handleRateUs() {
+    _supportService.openStoreListing();
   }
 
   void _onVersionTap() {
@@ -125,35 +120,46 @@ class _SettingsDialogState extends State<SettingsDialog> {
 
   @override
   Widget build(BuildContext context) {
-    return Dialog(
-      backgroundColor: Colors.transparent,
-      child: GlassCard(
-        borderRadius: BorderRadius.circular(20),
-        child: Padding(
-          padding: const EdgeInsets.all(24.0),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
+    return Scaffold(
+      extendBodyBehindAppBar: true,
+      appBar: AppBar(
+        title: const Text("SETTINGS"),
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        centerTitle: true,
+      ),
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: RadialGradient(
+            center: Alignment(-0.6, -0.6),
+            radius: 1.8,
+            colors: [
+              Color(0xFF1A1F35), // Deep Midnight
+              Color(0xFF0B0E14), // Almost Black
+            ],
+            stops: [0.0, 1.0],
+          ),
+        ),
+        child: SafeArea(
+          child: ListView(
+            padding: const EdgeInsets.all(24.0),
             children: [
-              // ---- HEADER ----
               const Text(
-                "SETTINGS & SUPPORT",
+                "SUPPORT",
                 style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 20,
+                  color: Colors.white54,
+                  fontSize: 12,
                   fontWeight: FontWeight.bold,
-                  letterSpacing: 1.5,
+                  letterSpacing: 1.2,
                 ),
               ),
-
-              const SizedBox(height: 24),
-
-              // ---- SUPPORT ----
+              const SizedBox(height: 8),
+              
               _SettingsTile(
                 icon: Icons.support_agent,
                 title: "Contact Support",
                 subtitle: "Report bugs or request features",
                 onTap: () {
-                  Navigator.pop(context);
                   Navigator.push(
                     context,
                     MaterialPageRoute(builder: (_) => const SupportScreen()),
@@ -167,25 +173,20 @@ class _SettingsDialogState extends State<SettingsDialog> {
                 icon: Icons.star_rate_rounded,
                 title: "Rate Us",
                 subtitle: "Love the app? Let us know!",
-                onTap: () => _handleRateUs(context),
+                onTap: _handleRateUs,
               ),
 
-              const SizedBox(height: 24),
+              const SizedBox(height: 32),
 
-              // ---- LEGAL ----
-              const Align(
-                alignment: Alignment.centerLeft,
-                child: Text(
-                  "LEGAL",
-                  style: TextStyle(
-                    color: Colors.white54,
-                    fontSize: 12,
-                    fontWeight: FontWeight.bold,
-                    letterSpacing: 1.2,
-                  ),
+              const Text(
+                "LEGAL",
+                style: TextStyle(
+                  color: Colors.white54,
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 1.2,
                 ),
               ),
-
               const SizedBox(height: 8),
 
               _SettingsTile(
@@ -208,25 +209,20 @@ class _SettingsDialogState extends State<SettingsDialog> {
                 ),
               ),
 
-              const SizedBox(height: 24),
+              const SizedBox(height: 40),
 
               // ---- VERSION (TAP 7x) ----
-              GestureDetector(
-                onTap: _onVersionTap,
-                child: Text(
-                  "Version $_version",
-                  style: TextStyle(
-                    color: Colors.white.withOpacity(0.3),
-                    fontSize: 12,
+              Center(
+                child: GestureDetector(
+                  onTap: _onVersionTap,
+                  child: Text(
+                    "Version $_version",
+                    style: TextStyle(
+                      color: Colors.white.withOpacity(0.3),
+                      fontSize: 12,
+                    ),
                   ),
                 ),
-              ),
-
-              const SizedBox(height: 12),
-
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text("Close"),
               ),
             ],
           ),
@@ -257,17 +253,24 @@ class _SettingsTile extends StatelessWidget {
       color: Colors.transparent,
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(16),
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
           decoration: BoxDecoration(
             color: Colors.white.withOpacity(0.05),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: Colors.white.withOpacity(0.1)),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: Colors.white.withOpacity(0.08)),
           ),
           child: Row(
             children: [
-              Icon(icon, color: Theme.of(context).primaryColor, size: 28),
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).primaryColor.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(icon, color: Theme.of(context).primaryColor, size: 24),
+              ),
               const SizedBox(width: 16),
               Expanded(
                 child: Column(
@@ -277,7 +280,7 @@ class _SettingsTile extends StatelessWidget {
                       title,
                       style: const TextStyle(
                         color: Colors.white,
-                        fontWeight: FontWeight.bold,
+                        fontWeight: FontWeight.w600,
                         fontSize: 16,
                       ),
                     ),
@@ -285,7 +288,7 @@ class _SettingsTile extends StatelessWidget {
                     Text(
                       subtitle,
                       style: TextStyle(
-                        color: Colors.white.withOpacity(0.6),
+                        color: Colors.white.withOpacity(0.5),
                         fontSize: 12,
                       ),
                     ),
@@ -293,8 +296,8 @@ class _SettingsTile extends StatelessWidget {
                 ),
               ),
               Icon(
-                Icons.arrow_forward_ios,
-                color: Colors.white.withOpacity(0.3),
+                Icons.arrow_forward_ios_rounded,
+                color: Colors.white.withOpacity(0.2),
                 size: 16,
               ),
             ],

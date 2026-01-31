@@ -51,10 +51,14 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     return Scaffold(
       body: Container(
         decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [Color(0xFF0F2027), Color(0xFF203A43)],
+          gradient: RadialGradient(
+            center: Alignment(-0.6, -0.6),
+            radius: 1.8,
+            colors: [
+              Color(0xFF1A1F35), // Deep Midnight
+              Color(0xFF0B0E14), // Almost Black
+            ],
+            stops: [0.0, 1.0],
           ),
         ),
         child: SafeArea(
@@ -93,28 +97,43 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          Icon(
-                            page.icon,
-                            size: 96,
-                            color: theme.primaryColor,
+                          Container(
+                            padding: const EdgeInsets.all(24),
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: theme.primaryColor.withOpacity(0.1),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: theme.primaryColor.withOpacity(0.2),
+                                  blurRadius: 30,
+                                  spreadRadius: 5,
+                                ),
+                              ],
+                            ),
+                            child: Icon(
+                              page.icon,
+                              size: 64,
+                              color: theme.primaryColor,
+                            ),
                           ),
                           const SizedBox(height: 48),
                           Text(
                             page.title,
                             style: const TextStyle(
-                              fontSize: 26,
-                              fontWeight: FontWeight.w700,
+                              fontSize: 28,
+                              fontWeight: FontWeight.w800,
                               color: Colors.white,
+                              letterSpacing: 0.5,
                             ),
                             textAlign: TextAlign.center,
                           ),
                           const SizedBox(height: 16),
                           Text(
                             page.body,
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontSize: 16,
                               height: 1.6,
-                              color: Colors.white70,
+                              color: Colors.white.withOpacity(0.7),
                             ),
                             textAlign: TextAlign.center,
                           ),
@@ -133,13 +152,13 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                   (index) => AnimatedContainer(
                     duration: const Duration(milliseconds: 250),
                     margin: const EdgeInsets.symmetric(horizontal: 4),
-                    width: _currentPage == index ? 20 : 8,
+                    width: _currentPage == index ? 24 : 8,
                     height: 8,
                     decoration: BoxDecoration(
                       borderRadius: BorderRadius.circular(4),
                       color: _currentPage == index
                           ? theme.primaryColor
-                          : Colors.white24,
+                          : Colors.white12,
                     ),
                   ),
                 ),
@@ -153,15 +172,16 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                     const EdgeInsets.symmetric(horizontal: 32, vertical: 24),
                 child: SizedBox(
                   width: double.infinity,
-                  height: 52,
+                  height: 56,
                   child: ElevatedButton(
                     style: ElevatedButton.styleFrom(
                       backgroundColor: theme.primaryColor,
-                      foregroundColor: Colors.black,
+                      foregroundColor: Colors.white,
                       shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(26),
+                        borderRadius: BorderRadius.circular(18),
                       ),
-                      elevation: 2,
+                      elevation: 8,
+                      shadowColor: theme.primaryColor.withOpacity(0.4),
                     ),
                     onPressed: _currentPage == _pages.length - 1
                         ? _finishOnboarding

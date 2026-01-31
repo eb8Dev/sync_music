@@ -63,6 +63,7 @@ class PartyNotifier extends Notifier<PartyState> {
 
     _socket.off("connect_error");
     _socket.off("disconnect");
+    _socket.off("PARTY_ENDED");
 
     if (!_socket.hasListeners("connect")) {
       _socket.on("connect", (_) {
@@ -147,6 +148,12 @@ class PartyNotifier extends Notifier<PartyState> {
         }
       });
     }
+
+    _socket.on("PARTY_ENDED", (_) {
+      debugPrint("Party Ended Event Received in Provider");
+      clearSession();
+      state = const PartyState(); // Reset state
+    });
   }
 
   void _startTimeout() {

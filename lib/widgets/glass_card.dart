@@ -6,6 +6,7 @@ class GlassCard extends StatelessWidget {
   final double opacity;
   final BorderRadius? borderRadius;
   final VoidCallback? onTap;
+  final bool enableBlur;
 
   const GlassCard({
     super.key,
@@ -13,6 +14,7 @@ class GlassCard extends StatelessWidget {
     this.opacity = 0.1,
     this.borderRadius,
     this.onTap,
+    this.enableBlur = true,
   });
 
   @override
@@ -21,20 +23,26 @@ class GlassCard extends StatelessWidget {
       onTap: onTap,
       child: ClipRRect(
         borderRadius: borderRadius ?? BorderRadius.circular(16),
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-          child: Container(
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: opacity),
-              borderRadius: borderRadius ?? BorderRadius.circular(16),
-              border: Border.all(
-                color: Colors.white.withValues(alpha: 0.1),
-              ),
-            ),
-            child: child,
-          ),
+        child: enableBlur
+            ? BackdropFilter(
+                filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                child: _buildContent(),
+              )
+            : _buildContent(),
+      ),
+    );
+  }
+
+  Widget _buildContent() {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: opacity),
+        borderRadius: borderRadius ?? BorderRadius.circular(16),
+        border: Border.all(
+          color: Colors.white.withValues(alpha: 0.1),
         ),
       ),
+      child: child,
     );
   }
 }

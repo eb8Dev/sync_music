@@ -118,10 +118,14 @@ class _SupportScreenState extends ConsumerState<SupportScreen> {
       extendBodyBehindAppBar: true,
       body: Container(
         decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [Color(0xFF0F2027), Color(0xFF203A43), Color(0xFF2C5364)],
+          gradient: RadialGradient(
+            center: Alignment(-0.6, -0.6),
+            radius: 1.8,
+            colors: [
+              Color(0xFF1A1F35), // Deep Midnight
+              Color(0xFF0B0E14), // Almost Black
+            ],
+            stops: [0.0, 1.0],
           ),
         ),
         child: SafeArea(
@@ -156,7 +160,7 @@ class _SupportScreenState extends ConsumerState<SupportScreen> {
                       child: DropdownButtonHideUnderline(
                         child: DropdownButton<String>(
                           value: _category,
-                          dropdownColor: const Color(0xFF2C5364),
+                          dropdownColor: const Color(0xFF151922),
                           icon: const Icon(Icons.arrow_drop_down, color: Colors.white),
                           isExpanded: true,
                           style: const TextStyle(color: Colors.white, fontSize: 16),

@@ -69,7 +69,8 @@ class CustomButton extends StatelessWidget {
               onPressed?.call();
             },
       style: ElevatedButton.styleFrom(
-        elevation: 0,
+        elevation: variant == ButtonVariant.primary ? 8 : 0,
+        shadowColor: variant == ButtonVariant.primary ? backgroundColor.withOpacity(0.4) : Colors.transparent,
         backgroundColor: backgroundColor,
         foregroundColor: foregroundColor,
         disabledBackgroundColor:
@@ -79,7 +80,7 @@ class CustomButton extends StatelessWidget {
         side: border,
         padding: const EdgeInsets.symmetric(vertical: 18),
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(18),
         ),
       ),
       child: _buildContent(),

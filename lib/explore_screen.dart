@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:sync_music/providers/explore_provider.dart';
@@ -5,40 +6,70 @@ import 'package:sync_music/providers/party_provider.dart';
 import 'package:sync_music/providers/user_provider.dart';
 import 'package:sync_music/widgets/glass_card.dart';
 
-class ExploreScreen extends ConsumerWidget {
+class ExploreScreen extends ConsumerStatefulWidget {
   const ExploreScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final exploreState = ref.watch(exploreProvider);
-    final partyMeta = ref.watch(partyProvider);
-    final userState = ref.watch(userProvider);
-    final theme = Theme.of(context);
+  ConsumerState<ExploreScreen> createState() => _ExploreScreenState();
+}
 
-    void fetchParties() {
-      ref.read(exploreProvider.notifier).fetchParties();
-    }
+class _ExploreScreenState extends ConsumerState<ExploreScreen> {
+  Timer? _refreshTimer;
 
-    void joinParty(String partyId) {
-      if (partyId == partyMeta.lastPartyId && partyMeta.isHost) {
-        ref
-            .read(partyProvider.notifier)
-            .reconnectAsHost(
-              partyId: partyId,
-              username: userState.username,
-              avatar: userState.avatar,
-            );
-      } else {
-        ref
-            .read(partyProvider.notifier)
-            .joinParty(
-              partyId: partyId,
-              username: userState.username,
-              avatar: userState.avatar,
-            );
+  @override
+  void initState() {
+    super.initState();
+    // Fetch immediately on load
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _fetchParties();
+    });
+    
+    // Auto-refresh every 10 seconds to keep list live
+    _refreshTimer = Timer.periodic(const Duration(seconds: 10), (_) {
+      if (mounted) {
+        _fetchParties(isAutoRefresh: true);
       }
-      Navigator.pop(context);
+    });
+  }
+
+  @override
+  void dispose() {
+    _refreshTimer?.cancel();
+    super.dispose();
+  }
+
+  void _fetchParties({bool isAutoRefresh = false}) {
+    // We can add a flag to provider to not set 'isLoading' on auto-refresh if desired,
+    // but the current simple fetch is fine. It just refreshes data.
+    // If you want to avoid loading spinner on auto-refresh, you'd modify provider.
+    // For now, simple fetch is standard.
+    ref.read(exploreProvider.notifier).fetchParties();
+  }
+
+  void _joinParty(String partyId) {
+    final partyMeta = ref.read(partyProvider);
+    final userState = ref.read(userProvider);
+
+    if (partyId == partyMeta.lastPartyId && partyMeta.isHost) {
+      ref.read(partyProvider.notifier).reconnectAsHost(
+            partyId: partyId,
+            username: userState.username,
+            avatar: userState.avatar,
+          );
+    } else {
+      ref.read(partyProvider.notifier).joinParty(
+            partyId: partyId,
+            username: userState.username,
+            avatar: userState.avatar,
+          );
     }
+    Navigator.pop(context);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final exploreState = ref.watch(exploreProvider);
+    final theme = Theme.of(context);
 
     return Scaffold(
       extendBodyBehindAppBar: true,
@@ -54,27 +85,31 @@ class ExploreScreen extends ConsumerWidget {
           IconButton(
             splashRadius: 20,
             icon: const Icon(Icons.refresh_rounded),
-            onPressed: fetchParties,
+            onPressed: () => _fetchParties(),
           ),
         ],
       ),
       body: Container(
         decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [Color(0xFF0F2027), Color(0xFF203A43), Color(0xFF2C5364)],
+          gradient: RadialGradient(
+            center: Alignment(-0.6, -0.6),
+            radius: 1.8,
+            colors: [
+              Color(0xFF1A1F35), // Deep Midnight
+              Color(0xFF0B0E14), // Almost Black
+            ],
+            stops: [0.0, 1.0],
           ),
         ),
         child: SafeArea(
           child: AnimatedSwitcher(
             duration: const Duration(milliseconds: 250),
-            child: exploreState.isLoading
+            child: exploreState.isLoading && exploreState.publicParties.isEmpty
                 ? _LoadingState(theme: theme)
                 : exploreState.publicParties.isEmpty
-                ? _EmptyState(onRefresh: fetchParties)
+                ? _EmptyState(onRefresh: () => _fetchParties())
                 : ListView.builder(
-                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+                    padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
                     itemCount: exploreState.publicParties.length,
                     itemBuilder: (context, index) {
                       final party = exploreState.publicParties[index];
@@ -83,7 +118,7 @@ class ExploreScreen extends ConsumerWidget {
                         padding: const EdgeInsets.only(bottom: 12),
                         child: GlassCard(
                           borderRadius: BorderRadius.circular(16),
-                          onTap: () => joinParty(party['id']),
+                          onTap: () => _joinParty(party['id']),
                           child: Padding(
                             padding: const EdgeInsets.symmetric(
                               horizontal: 16,

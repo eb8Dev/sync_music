@@ -215,232 +215,310 @@ class _WaitingScreenState extends ConsumerState<WaitingScreen> {
     });
 
     return Scaffold(
-      appBar: AppBar(
-        surfaceTintColor: Colors.transparent,
-        scrolledUnderElevation: 0,
-        title: InkWell(
-          onTap: _copyCode,
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text("CODE: ${widget.party["id"]}"),
-              const SizedBox(width: 8),
-              const Icon(Icons.copy, size: 16),
-            ],
-          ),
-        ),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.share, size: 20, color: Colors.white70),
-            onPressed: _shareParty,
-          ),
-          Padding(
-            padding: const EdgeInsets.only(left: 8.0),
-            child: IconButton(
-              icon: const Icon(Icons.qr_code, size: 20, color: Colors.white70),
-              constraints: const BoxConstraints(),
-              padding: EdgeInsets.zero,
-              onPressed: _showQRCode,
-            ),
-          ),
-        ],
-      ),
       body: Stack(
         children: [
-          SafeArea(
-            child: Container(
-              decoration: const BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [Color(0xFF121212), Color(0xFF1E1E1E)],
-                ),
+          // Background
+          Container(
+            decoration: const BoxDecoration(
+              gradient: RadialGradient(
+                center: Alignment(0.0, -0.2),
+                radius: 1.6,
+                colors: [
+                  Color(0xFF151922), // Surface
+                  Color(0xFF0B0E14), // Background
+                ],
               ),
-              child: Column(
-                children: [
-                  const SizedBox(height: 16),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 24),
-                    child: GlassCard(
-                      opacity: 0.05,
-                      child: Padding(
-                        padding: const EdgeInsets.all(16),
-                        child: Row(
-                          children: [
-                            Icon(
-                              isHost ? Icons.local_activity : Icons.headset,
-                              color: Theme.of(context).primaryColor,
-                            ),
-                            const SizedBox(width: 16),
-                            Text(
-                              isHost
-                                  ? "YOU ARE HOST"
-                                  : "WAITING FOR HOST TO START",
-                              style: const TextStyle(
-                                fontWeight: FontWeight.bold,
-                                letterSpacing: 1.2,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
+            ),
+          ),
 
-                  // Simplified logs for now, using the messages from provider if they are system type
-                  if (partyState.messages.any((m) => m['type'] == 'system'))
-                    Container(
-                      height: 100,
-                      margin: const EdgeInsets.symmetric(
-                        horizontal: 24,
-                        vertical: 12,
-                      ),
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: Colors.black12,
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: ListView(
-                        reverse: true,
-                        children: partyState.messages
-                            .where((m) => m['type'] == 'system')
-                            .toList()
-                            .reversed
-                            .map(
-                              (m) => Text(
-                                m['text'] ?? "",
-                                style: const TextStyle(
-                                  color: Colors.white54,
-                                  fontSize: 12,
-                                ),
-                              ),
-                            )
-                            .toList(),
-                      ),
-                    ),
-
-                  const SizedBox(height: 12),
-                  Expanded(
-                    child: partyState.queue.isEmpty
-                        ? Center(
-                            child: Text(
-                              "Queue is empty",
-                              style: TextStyle(
-                                color: Colors.white.withValues(alpha: 0.3),
-                              ),
+          SafeArea(
+            child: Column(
+              children: [
+                // ---- CUSTOM HEADER ----
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            "PARTY CODE",
+                            style: TextStyle(
+                              color: Colors.white.withOpacity(0.5),
+                              fontSize: 10,
+                              fontWeight: FontWeight.bold,
+                              letterSpacing: 1.5,
                             ),
-                          )
-                        : ListView.builder(
-                            padding: const EdgeInsets.symmetric(horizontal: 24),
-                            itemCount: partyState.queue.length,
-                            itemBuilder: (_, i) {
-                              final track = partyState.queue[i];
-                              return Padding(
-                                padding: const EdgeInsets.only(bottom: 8),
-                                child: GlassCard(
-                                  opacity: 0.05,
-                                  borderRadius: BorderRadius.circular(12),
-                                  child: ListTile(
-                                    dense: true,
-                                    leading: Text(
-                                      "${i + 1}",
-                                      style: const TextStyle(
-                                        color: Colors.white54,
-                                      ),
-                                    ),
-                                    title: Text(
-                                      track["title"],
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                    subtitle: Text(
-                                      "By ${track["addedBy"] ?? 'Unknown'}",
-                                      style: TextStyle(
-                                        color: Theme.of(context).primaryColor,
-                                        fontSize: 10,
-                                      ),
-                                    ),
+                          ),
+                          const SizedBox(height: 4),
+                          GestureDetector(
+                            onTap: _copyCode,
+                            child: Row(
+                              children: [
+                                Text(
+                                  widget.party["id"],
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 28,
+                                    fontWeight: FontWeight.w800,
+                                    letterSpacing: 2.0,
                                   ),
                                 ),
-                              );
-                            },
-                          ),
-                  ),
-                  Container(
-                    padding: const EdgeInsets.all(16),
-                    color: const Color(0xFF121212),
-                    child: Column(
-                      children: [
-                        TextField(
-                          controller: searchCtrl,
-                          onChanged: _onSearchChanged,
-                          decoration: InputDecoration(
-                            hintText: "Search YouTube songs...",
-                            prefixIcon: const Icon(Icons.search),
-                            suffixIcon: isSearching
-                                ? const SizedBox(
-                                    width: 20,
-                                    height: 20,
-                                    child: Padding(
-                                      padding: EdgeInsets.all(10),
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: 2,
-                                      ),
-                                    ),
-                                  )
-                                : null,
-                          ),
-                        ),
-                        if (searchResults.isNotEmpty)
-                          Container(
-                            constraints: const BoxConstraints(maxHeight: 200),
-                            margin: const EdgeInsets.only(top: 8),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFF1E1E1E),
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: ListView.separated(
-                              shrinkWrap: true,
-                              itemCount: searchResults.length,
-                              separatorBuilder: (_, __) => const Divider(
-                                height: 1,
-                                color: Colors.white10,
-                              ),
-                              itemBuilder: (_, i) {
-                                final video = searchResults[i];
-                                return ListTile(
-                                  leading: Image.network(
-                                    video.thumbnails.lowResUrl,
-                                    width: 40,
-                                    fit: BoxFit.cover,
-                                  ),
-                                  title: Text(
-                                    video.title,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(fontSize: 12),
-                                  ),
-                                  onTap: () => _addVideo(video),
-                                );
-                              },
-                            ),
-                          ),
-                        if (isHost) ...[
-                          const SizedBox(height: 16),
-                          SizedBox(
-                            width: double.infinity,
-                            child: ElevatedButton.icon(
-                              icon: const Icon(Icons.play_arrow),
-                              label: const Text("START PARTY"),
-                              onPressed: _startParty,
+                                const SizedBox(width: 8),
+                                Icon(Icons.copy_rounded, size: 16, color: Theme.of(context).primaryColor),
+                              ],
                             ),
                           ),
                         ],
-                      ],
-                    ),
+                      ),
+                      Row(
+                        children: [
+                          _HeaderActionButton(
+                            icon: Icons.qr_code_rounded,
+                            onTap: _showQRCode,
+                          ),
+                          const SizedBox(width: 12),
+                          _HeaderActionButton(
+                            icon: Icons.share_rounded,
+                            onTap: _shareParty,
+                            isPrimary: true,
+                          ),
+                        ],
+                      ),
+                    ],
                   ),
-                ],
-              ),
+                ),
+
+                const SizedBox(height: 20),
+
+                // ---- STATUS HERO ----
+                Expanded(
+                  child: partyState.queue.isEmpty
+                      ? Center(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.all(24),
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  color: Theme.of(context).primaryColor.withOpacity(0.1),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: Theme.of(context).primaryColor.withOpacity(0.2),
+                                      blurRadius: 40,
+                                      spreadRadius: 10,
+                                    ),
+                                  ],
+                                ),
+                                child: Icon(
+                                  isHost ? Icons.headphones_rounded : Icons.headset_mic_rounded,
+                                  size: 64,
+                                  color: Theme.of(context).primaryColor,
+                                ),
+                              ),
+                              const SizedBox(height: 32),
+                              Text(
+                                isHost ? "You are the Host" : "Waiting for Host",
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 20,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                isHost
+                                    ? "Add songs to the queue to start."
+                                    : "Sit tight! The party will start soon.",
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                  color: Colors.white.withOpacity(0.6),
+                                  fontSize: 14,
+                                ),
+                              ),
+                            ],
+                          ),
+                        )
+                      : ListView.builder(
+                          padding: const EdgeInsets.symmetric(horizontal: 20),
+                          itemCount: partyState.queue.length,
+                          itemBuilder: (_, i) {
+                            final track = partyState.queue[i];
+                            return Padding(
+                              padding: const EdgeInsets.only(bottom: 12),
+                              child: GlassCard(
+                                opacity: 0.05,
+                                borderRadius: BorderRadius.circular(16),
+                                child: Padding(
+                                  padding: const EdgeInsets.all(12),
+                                  child: Row(
+                                    children: [
+                                      Container(
+                                        width: 40,
+                                        height: 40,
+                                        alignment: Alignment.center,
+                                        decoration: BoxDecoration(
+                                          color: Colors.white.withOpacity(0.1),
+                                          borderRadius: BorderRadius.circular(8),
+                                        ),
+                                        child: Text(
+                                          "${i + 1}",
+                                          style: const TextStyle(
+                                            color: Colors.white70,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 16),
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              track["title"],
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: const TextStyle(
+                                                color: Colors.white,
+                                                fontWeight: FontWeight.w600,
+                                                fontSize: 14,
+                                              ),
+                                            ),
+                                            const SizedBox(height: 4),
+                                            Text(
+                                              "Added by ${track["addedBy"] ?? 'Unknown'}",
+                                              style: TextStyle(
+                                                color: Theme.of(context).primaryColor.withOpacity(0.8),
+                                                fontSize: 11,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                ),
+
+                // ---- BOTTOM ACTION SHEET ----
+                Container(
+                  padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF151922),
+                    borderRadius: const BorderRadius.vertical(top: Radius.circular(32)),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.4),
+                        blurRadius: 20,
+                        offset: const Offset(0, -5),
+                      ),
+                    ],
+                  ),
+                  child: Column(
+                    children: [
+                      TextField(
+                        controller: searchCtrl,
+                        onChanged: _onSearchChanged,
+                        style: const TextStyle(color: Colors.white),
+                        decoration: InputDecoration(
+                          hintText: "Add a song to queue...",
+                          hintStyle: TextStyle(color: Colors.white.withOpacity(0.4)),
+                          prefixIcon: Icon(Icons.search_rounded, color: Colors.white.withOpacity(0.4)),
+                          suffixIcon: isSearching
+                              ? Padding(
+                                  padding: const EdgeInsets.all(12),
+                                  child: SizedBox(
+                                    width: 20,
+                                    height: 20,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: Theme.of(context).primaryColor,
+                                    ),
+                                  ),
+                                )
+                              : null,
+                          filled: true,
+                          fillColor: Colors.white.withOpacity(0.05),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(16),
+                            borderSide: BorderSide.none,
+                          ),
+                          contentPadding: const EdgeInsets.symmetric(vertical: 16, horizontal: 20),
+                        ),
+                      ),
+                      
+                      if (searchResults.isNotEmpty)
+                        Container(
+                          constraints: const BoxConstraints(maxHeight: 220),
+                          margin: const EdgeInsets.only(top: 12),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withOpacity(0.05),
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                          child: ListView.separated(
+                            padding: EdgeInsets.zero,
+                            shrinkWrap: true,
+                            itemCount: searchResults.length,
+                            separatorBuilder: (_, __) => Divider(height: 1, color: Colors.white.withOpacity(0.05)),
+                            itemBuilder: (_, i) {
+                              final video = searchResults[i];
+                              return ListTile(
+                                visualDensity: VisualDensity.compact,
+                                leading: ClipRRect(
+                                  borderRadius: BorderRadius.circular(6),
+                                  child: Image.network(
+                                    video.thumbnails.lowResUrl,
+                                    width: 40,
+                                    height: 40,
+                                    fit: BoxFit.cover,
+                                  ),
+                                ),
+                                title: Text(
+                                  video.title,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(color: Colors.white, fontSize: 13),
+                                ),
+                                onTap: () => _addVideo(video),
+                              );
+                            },
+                          ),
+                        ),
+
+                      if (isHost && partyState.queue.isNotEmpty) ...[
+                        const SizedBox(height: 16),
+                        SizedBox(
+                          width: double.infinity,
+                          child: ElevatedButton(
+                            onPressed: _startParty,
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Theme.of(context).primaryColor,
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(vertical: 18),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                              elevation: 8,
+                              shadowColor: Theme.of(context).primaryColor.withOpacity(0.4),
+                            ),
+                            child: const Text(
+                              "START PARTY",
+                              style: TextStyle(fontWeight: FontWeight.bold, letterSpacing: 1.0),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ],
             ),
           ),
           if (partyState.countdown != null)
@@ -482,6 +560,40 @@ class _WaitingScreenState extends ConsumerState<WaitingScreen> {
               ),
             ),
         ],
+      ),
+    );
+  }
+}
+
+class _HeaderActionButton extends StatelessWidget {
+  final IconData icon;
+  final VoidCallback onTap;
+  final bool isPrimary;
+
+  const _HeaderActionButton({
+    required this.icon,
+    required this.onTap,
+    this.isPrimary = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          color: isPrimary ? Theme.of(context).primaryColor : Colors.white.withOpacity(0.05),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: isPrimary ? Colors.transparent : Colors.white.withOpacity(0.1),
+          ),
+        ),
+        child: Icon(
+          icon,
+          size: 20,
+          color: isPrimary ? Colors.black : Colors.white,
+        ),
       ),
     );
   }

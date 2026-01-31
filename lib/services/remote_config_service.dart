@@ -10,7 +10,7 @@ class RemoteConfigService {
   Future<void> initialize() async {
     try {
       await _remoteConfig.setConfigSettings(RemoteConfigSettings(
-        fetchTimeout: const Duration(minutes: 1),
+        fetchTimeout: const Duration(seconds: 5),
         minimumFetchInterval: const Duration(hours: 1),
       ));
 
