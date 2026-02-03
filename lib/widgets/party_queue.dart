@@ -52,11 +52,11 @@ class PartyQueue extends ConsumerWidget {
                 alignment: Alignment.center,
                 decoration: BoxDecoration(
                   color: isCurrent 
-                      ? theme.primaryColor.withOpacity(0.2) 
-                      : Colors.white.withOpacity(0.08),
+                      ? theme.primaryColor.withValues(alpha:0.2) 
+                      : Colors.white.withValues(alpha:0.08),
                   borderRadius: BorderRadius.circular(8),
                   border: isCurrent 
-                      ? Border.all(color: theme.primaryColor.withOpacity(0.5)) 
+                      ? Border.all(color: theme.primaryColor.withValues(alpha:0.5)) 
                       : null,
                 ),
                 child: thumbnailUrl != null
@@ -106,7 +106,7 @@ class PartyQueue extends ConsumerWidget {
                 child: Text(
                   "Added by ${track["addedBy"] ?? 'Unknown'}",
                   style: TextStyle(
-                    color: isCurrent ? theme.primaryColor.withOpacity(0.8) : Colors.white38,
+                    color: isCurrent ? theme.primaryColor.withValues(alpha:0.8) : Colors.white38,
                     fontSize: 11,
                     letterSpacing: 0.3,
                   ),
@@ -119,7 +119,7 @@ class PartyQueue extends ConsumerWidget {
                       splashRadius: 20,
                       icon: Icon(
                         Icons.remove_circle_outline_rounded,
-                        color: Colors.white.withOpacity(0.3),
+                        color: Colors.white.withValues(alpha:0.3),
                         size: 20,
                       ),
                       onPressed: () => notifier.removeTrack(partyId, track["id"]),

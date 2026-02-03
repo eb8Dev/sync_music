@@ -210,6 +210,7 @@ class PartyNotifier extends Notifier<PartyState> {
     required String avatar,
     String? name,
     bool isPublic = false,
+    String mode = 'party',
   }) {
     state = state.copyWith(connecting: true, error: null);
     _startTimeout();
@@ -220,6 +221,7 @@ class PartyNotifier extends Notifier<PartyState> {
       "avatar": avatar,
       "name": name,
       "isPublic": isPublic,
+      "mode": mode,
     });
   }
 

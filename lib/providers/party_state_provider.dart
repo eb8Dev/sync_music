@@ -251,6 +251,10 @@ class PartyScreenNotifier extends Notifier<DetailedPartyState> {
   void pause(String partyId) {
     _socket.emit("PAUSE", {"partyId": partyId});
   }
+  
+  void seek(String partyId, int position) {
+    _socket.emit("SEEK", {"partyId": partyId, "position": position});
+  }
 
   void changeTrack(String partyId, int index) {
     _socket.emit("CHANGE_INDEX", {"partyId": partyId, "newIndex": index});

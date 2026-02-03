@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:app_links/app_links.dart';
 import 'package:sync_music/providers/party_provider.dart';
@@ -30,10 +31,44 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   final AnalyticsService _analytics = AnalyticsService();
 
   final List<String> avatars = [
-    "🎧", "🎸", "🎹", "🎤", "🎷", "🎺", "🥁", "🎻", "🎼", "🎙️", "📻", "🎵",
-    "🌙", "☁️", "🌌", "💭", "🕯️", "⭐", "✨", "🔥", "⚡", "🎉",
-    "🧢", "📼", "💿", "🖤", "🌵", "🧠", "📚", "🧐", "🎩",
-    "😎", "😊", "🤝", "💬", "👀", "🕶️", "🌫️",
+    "🎧",
+    "🎸",
+    "🎹",
+    "🎤",
+    "🎷",
+    "🎺",
+    "🥁",
+    "🎻",
+    "🎼",
+    "🎙️",
+    "📻",
+    "🎵",
+    "🌙",
+    "☁️",
+    "🌌",
+    "💭",
+    "🕯️",
+    "⭐",
+    "✨",
+    "🔥",
+    "⚡",
+    "🎉",
+    "🧢",
+    "📼",
+    "💿",
+    "🖤",
+    "🌵",
+    "🧠",
+    "📚",
+    "🧐",
+    "🎩",
+    "😎",
+    "😊",
+    "🤝",
+    "💬",
+    "👀",
+    "🕶️",
+    "🌫️",
   ];
 
   @override
@@ -41,11 +76,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     super.initState();
     _checkForUpdate();
     _initDeepLinks();
-    
+
+    // Log event to trigger In-App Messaging campaigns configured for Home Screen
+    _analytics.logViewHomeScreen();
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
       NotificationService().showWelcomeNotificationIfFirstTime();
     });
-    
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final userState = ref.read(userProvider);
       if (userState.username.isNotEmpty) {
@@ -58,7 +96,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     _appLinks = AppLinks();
     final appLink = await _appLinks.getInitialLink();
     if (appLink != null) _handleDeepLink(appLink);
-    _linkSubscription = _appLinks.uriLinkStream.listen((uri) => _handleDeepLink(uri));
+    _linkSubscription = _appLinks.uriLinkStream.listen(
+      (uri) => _handleDeepLink(uri),
+    );
   }
 
   void _handleDeepLink(Uri uri) {
@@ -75,7 +115,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           codeCtrl.text = code!.toUpperCase();
         });
         if (nameCtrl.text.trim().isNotEmpty) {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Auto-joining party: $code")));
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text("Auto-joining party: $code")));
           _joinParty();
         }
       }
@@ -95,12 +137,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
   void _showProfileEditor({VoidCallback? onSave}) {
     final tempNameCtrl = TextEditingController(text: nameCtrl.text);
-    
+
     showModalBottomSheet(
       context: context,
       backgroundColor: const Color(0xFF151922),
       isScrollControlled: true,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
       builder: (context) {
         return Padding(
           padding: EdgeInsets.only(
@@ -113,9 +157,16 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const Text("SETUP PROFILE", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, letterSpacing: 1.2)),
+              const Text(
+                "SETUP PROFILE",
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 1.2,
+                ),
+              ),
               const SizedBox(height: 24),
-              
+
               // Avatar Selector
               Center(
                 child: GestureDetector(
@@ -123,7 +174,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     Navigator.pop(context); // Close this sheet first
                     _showAvatarPicker(); // Then open avatar picker
                     // Note: This flow is a bit clunky, ideally we'd nest them or return a value
-                    // But for now, let's keep it simple. 
+                    // But for now, let's keep it simple.
                     // Better UX: Show avatar grid IN here or make avatar picker return value.
                     // Let's rely on _showAvatarPicker updating the provider directly for now.
                   },
@@ -135,18 +186,28 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                         height: 80,
                         alignment: Alignment.center,
                         decoration: BoxDecoration(
-                          color: Colors.white.withOpacity(0.1),
+                          color: Colors.white.withValues(alpha: 0.1),
                           shape: BoxShape.circle,
-                          border: Border.all(color: Theme.of(context).primaryColor),
+                          border: Border.all(
+                            color: Theme.of(context).primaryColor,
+                          ),
                         ),
-                        child: Text(avatar, style: const TextStyle(fontSize: 40)),
+                        child: Text(
+                          avatar,
+                          style: const TextStyle(fontSize: 40),
+                        ),
                       );
                     },
                   ),
                 ),
               ),
               const SizedBox(height: 16),
-              const Center(child: Text("Tap to change avatar", style: TextStyle(color: Colors.white54, fontSize: 12))),
+              const Center(
+                child: Text(
+                  "Tap to change avatar",
+                  style: TextStyle(color: Colors.white54, fontSize: 12),
+                ),
+              ),
               const SizedBox(height: 24),
 
               // Name Input
@@ -157,8 +218,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   labelText: "Display Name",
                   labelStyle: const TextStyle(color: Colors.white70),
                   filled: true,
-                  fillColor: Colors.white.withOpacity(0.05),
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                  fillColor: Colors.white.withValues(alpha: 0.05),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
                 ),
               ),
               const SizedBox(height: 32),
@@ -166,14 +229,16 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               ElevatedButton(
                 onPressed: () {
                   if (tempNameCtrl.text.trim().isEmpty) return;
-                  
+
                   setState(() {
                     nameCtrl.text = tempNameCtrl.text.trim();
                   });
-                  
+
                   final avatar = ref.read(userProvider).avatar;
-                  ref.read(userProvider.notifier).saveUser(nameCtrl.text, avatar);
-                  
+                  ref
+                      .read(userProvider.notifier)
+                      .saveUser(nameCtrl.text, avatar);
+
                   Navigator.pop(context);
                   onSave?.call();
                 },
@@ -181,9 +246,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   backgroundColor: Theme.of(context).primaryColor,
                   foregroundColor: Colors.white,
                   padding: const EdgeInsets.symmetric(vertical: 16),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
                 ),
-                child: const Text("Save & Continue", style: TextStyle(fontWeight: FontWeight.bold)),
+                child: const Text(
+                  "Save & Continue",
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
               ),
               const SizedBox(height: 24),
             ],
@@ -201,19 +271,30 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     return false;
   }
 
-  void _createParty({String? name, bool isPublic = false}) {
-    if (!_ensureNameSet(() => _createParty(name: name, isPublic: isPublic))) return;
+  void _createParty({
+    String? name,
+    bool isPublic = false,
+    String mode = 'party',
+  }) {
+    if (!_ensureNameSet(
+      () => _createParty(name: name, isPublic: isPublic, mode: mode),
+    )) {
+      return;
+    }
 
     final username = nameCtrl.text.trim();
     final avatar = ref.read(userProvider).avatar;
     ref.read(userProvider.notifier).saveUser(username, avatar);
-    
-    ref.read(partyProvider.notifier).createParty(
-      username: username,
-      avatar: avatar,
-      name: name,
-      isPublic: isPublic,
-    );
+
+    ref
+        .read(partyProvider.notifier)
+        .createParty(
+          username: username,
+          avatar: avatar,
+          name: name,
+          isPublic: isPublic,
+          mode: mode,
+        );
   }
 
   void _showCreatePartyDialog() {
@@ -221,6 +302,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
     final partyNameCtrl = TextEditingController();
     bool isPublic = false;
+    String mode = 'party';
 
     showModalBottomSheet(
       context: context,
@@ -232,126 +314,189 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       builder: (context) {
         return StatefulBuilder(
           builder: (context, setState) {
-            return Padding(
-              padding: EdgeInsets.only(
-                bottom: MediaQuery.of(context).viewInsets.bottom + 24,
-                left: 24,
-                right: 24,
-                top: 24,
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  // ---- HEADER ----
-                  Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(10),
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          gradient: LinearGradient(
-                            colors: [
-                              Theme.of(context).primaryColor,
-                              Theme.of(context).primaryColor.withOpacity(0.5),
-                            ],
+            return SafeArea(
+              child: Padding(
+                padding: EdgeInsets.only(
+                  bottom: MediaQuery.of(context).viewInsets.bottom + 24,
+                  left: 24,
+                  right: 24,
+                  top: 24,
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    // ---- HEADER ----
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            gradient: LinearGradient(
+                              colors: [
+                                Theme.of(context).primaryColor,
+                                Theme.of(
+                                  context,
+                                ).primaryColor.withValues(alpha: 0.5),
+                              ],
+                            ),
+                          ),
+                          child: const Icon(
+                            Icons.rocket_launch_rounded,
+                            color: Colors.white,
+                            size: 24,
                           ),
                         ),
-                        child: const Icon(Icons.rocket_launch_rounded, color: Colors.white, size: 24),
+                        const SizedBox(width: 16),
+                        const Text(
+                          "Launch Party",
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 24),
+
+                    // ---- INPUT ----
+                    TextField(
+                      controller: partyNameCtrl,
+                      style: const TextStyle(color: Colors.white),
+                      decoration: InputDecoration(
+                        labelText: "Party Name (Optional)",
+                        labelStyle: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.5),
+                        ),
+                        filled: true,
+                        fillColor: Colors.white.withValues(alpha: 0.05),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(16),
+                          borderSide: BorderSide.none,
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(16),
+                          borderSide: BorderSide(
+                            color: Theme.of(context).primaryColor,
+                          ),
+                        ),
+                        contentPadding: const EdgeInsets.all(16),
                       ),
-                      const SizedBox(width: 16),
-                      const Text(
-                        "Launch Party",
+                    ),
+                    const SizedBox(height: 24),
+
+                    // ---- MODE ----
+                    const Text(
+                      "PARTY MODE",
+                      style: TextStyle(
+                        color: Colors.white54,
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 1.0,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _buildVisibilityOption(
+                            context,
+                            title: "Music",
+                            subtitle: "Standard Party",
+                            icon: Icons.music_note,
+                            isSelected: mode == 'party',
+                            onTap: () => setState(() => mode = 'party'),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: _buildVisibilityOption(
+                            context,
+                            title: "Movie",
+                            subtitle: "Watch Together",
+                            icon: Icons.movie_filter_rounded,
+                            isSelected: mode == 'movie',
+                            onTap: () => setState(() => mode = 'movie'),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 24),
+
+                    // ---- TOGGLE ----
+                    const Text(
+                      "VISIBILITY",
+                      style: TextStyle(
+                        color: Colors.white54,
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 1.0,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _buildVisibilityOption(
+                            context,
+                            title: "Private",
+                            subtitle: "Invite only",
+                            icon: Icons.lock_outline,
+                            isSelected: !isPublic,
+                            onTap: () => setState(() => isPublic = false),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: _buildVisibilityOption(
+                            context,
+                            title: "Public",
+                            subtitle: "Anyone can join",
+                            icon: Icons.public,
+                            isSelected: isPublic,
+                            onTap: () => setState(() => isPublic = true),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 32),
+
+                    // ---- ACTION ----
+                    ElevatedButton(
+                      onPressed: () {
+                        Navigator.pop(context);
+                        _createParty(
+                          name: partyNameCtrl.text.trim().isEmpty
+                              ? null
+                              : partyNameCtrl.text.trim(),
+                          isPublic: isPublic,
+                          mode: mode,
+                        );
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Theme.of(context).primaryColor,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 18),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        elevation: 8,
+                        shadowColor: Theme.of(
+                          context,
+                        ).primaryColor.withValues(alpha: 0.4),
+                      ),
+                      child: const Text(
+                        "Launch Now",
                         style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 20,
+                          fontSize: 16,
                           fontWeight: FontWeight.bold,
                         ),
                       ),
-                    ],
-                  ),
-                  const SizedBox(height: 24),
-
-                  // ---- INPUT ----
-                  TextField(
-                    controller: partyNameCtrl,
-                    style: const TextStyle(color: Colors.white),
-                    decoration: InputDecoration(
-                      labelText: "Party Name (Optional)",
-                      labelStyle: TextStyle(color: Colors.white.withOpacity(0.5)),
-                      filled: true,
-                      fillColor: Colors.white.withOpacity(0.05),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(16),
-                        borderSide: BorderSide.none,
-                      ),
-                      focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(16),
-                        borderSide: BorderSide(color: Theme.of(context).primaryColor),
-                      ),
-                      contentPadding: const EdgeInsets.all(16),
                     ),
-                  ),
-                  const SizedBox(height: 24),
-
-                  // ---- TOGGLE ----
-                  const Text(
-                    "VISIBILITY",
-                    style: TextStyle(
-                      color: Colors.white54,
-                      fontSize: 12,
-                      fontWeight: FontWeight.bold,
-                      letterSpacing: 1.0,
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: _buildVisibilityOption(
-                          context,
-                          title: "Private",
-                          subtitle: "Invite only",
-                          icon: Icons.lock_outline,
-                          isSelected: !isPublic,
-                          onTap: () => setState(() => isPublic = false),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: _buildVisibilityOption(
-                          context,
-                          title: "Public",
-                          subtitle: "Anyone can join",
-                          icon: Icons.public,
-                          isSelected: isPublic,
-                          onTap: () => setState(() => isPublic = true),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 32),
-
-                  // ---- ACTION ----
-                  ElevatedButton(
-                    onPressed: () {
-                      Navigator.pop(context);
-                      _createParty(
-                        name: partyNameCtrl.text.trim().isEmpty ? null : partyNameCtrl.text.trim(),
-                        isPublic: isPublic,
-                      );
-                    },
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Theme.of(context).primaryColor,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 18),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                      elevation: 8,
-                      shadowColor: Theme.of(context).primaryColor.withOpacity(0.4),
-                    ),
-                    child: const Text("Launch Now", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                  ),
-                ],
+                  ],
+                ),
               ),
             );
           },
@@ -368,8 +513,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     required bool isSelected,
     required VoidCallback onTap,
   }) {
-    final color = isSelected ? Theme.of(context).primaryColor : Colors.white.withOpacity(0.05);
-    final borderColor = isSelected ? Theme.of(context).primaryColor : Colors.transparent;
+    final color = isSelected
+        ? Theme.of(context).primaryColor
+        : Colors.white.withValues(alpha: 0.05);
+    final borderColor = isSelected
+        ? Theme.of(context).primaryColor
+        : Colors.transparent;
 
     return GestureDetector(
       onTap: onTap,
@@ -377,14 +526,20 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         duration: const Duration(milliseconds: 200),
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: isSelected ? color.withOpacity(0.1) : color,
+          color: isSelected ? color.withValues(alpha: 0.1) : color,
           borderRadius: BorderRadius.circular(16),
           border: Border.all(color: borderColor, width: 1.5),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Icon(icon, color: isSelected ? Theme.of(context).primaryColor : Colors.white54, size: 24),
+            Icon(
+              icon,
+              color: isSelected
+                  ? Theme.of(context).primaryColor
+                  : Colors.white54,
+              size: 24,
+            ),
             const SizedBox(height: 12),
             Text(
               title,
@@ -412,17 +567,21 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     if (!_ensureNameSet(_joinParty)) return;
 
     final username = nameCtrl.text.trim();
-    final code = codeCtrl.text.trim().toUpperCase();
+    var code = codeCtrl.text.trim();
+
+    if (code.toLowerCase().startsWith("syncmusic://join/")) {
+      code = code.substring(17);
+    }
+
+    code = code.toUpperCase();
     if (code.isEmpty) return;
 
     final avatar = ref.read(userProvider).avatar;
     ref.read(userProvider.notifier).saveUser(username, avatar);
 
-    ref.read(partyProvider.notifier).joinParty(
-      partyId: code,
-      username: username,
-      avatar: avatar,
-    );
+    ref
+        .read(partyProvider.notifier)
+        .joinParty(partyId: code, username: username, avatar: avatar);
   }
 
   Future<void> _scanQR() async {
@@ -432,13 +591,16 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     );
 
     if (result != null && result is String) {
+      var code = result;
+      if (code.toLowerCase().startsWith("syncmusic://join/")) {
+        code = code.substring(17);
+      }
       setState(() {
-        codeCtrl.text = result;
+        codeCtrl.text = code.toUpperCase();
       });
       _joinParty();
     }
   }
-
 
   void _showAvatarPicker() {
     final currentAvatar = ref.read(userProvider).avatar;
@@ -446,7 +608,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       context: context,
       backgroundColor: const Color(0xFF151922),
       isScrollControlled: true,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
       builder: (context) {
         return DraggableScrollableSheet(
           expand: false,
@@ -458,29 +622,54 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               padding: const EdgeInsets.all(24),
               child: Column(
                 children: [
-                  const Text("CHOOSE AVATAR", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, letterSpacing: 1.2)),
+                  const Text(
+                    "CHOOSE AVATAR",
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 1.2,
+                    ),
+                  ),
                   const SizedBox(height: 24),
                   Expanded(
                     child: GridView.builder(
                       controller: scrollController,
-                      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 4, mainAxisSpacing: 16, crossAxisSpacing: 16),
+                      gridDelegate:
+                          const SliverGridDelegateWithFixedCrossAxisCount(
+                            crossAxisCount: 4,
+                            mainAxisSpacing: 16,
+                            crossAxisSpacing: 16,
+                          ),
                       itemCount: avatars.length,
                       itemBuilder: (context, index) {
                         final avatar = avatars[index];
                         final isSelected = avatar == currentAvatar;
                         return GestureDetector(
                           onTap: () {
-                            ref.read(userProvider.notifier).saveUser(nameCtrl.text.trim(), avatar);
+                            ref
+                                .read(userProvider.notifier)
+                                .saveUser(nameCtrl.text.trim(), avatar);
                             Navigator.pop(context);
                           },
                           child: Container(
                             decoration: BoxDecoration(
-                              color: isSelected ? Theme.of(context).primaryColor.withValues(alpha: 0.2) : Colors.white.withValues(alpha: 0.05),
+                              color: isSelected
+                                  ? Theme.of(
+                                      context,
+                                    ).primaryColor.withValues(alpha: 0.2)
+                                  : Colors.white.withValues(alpha: 0.05),
                               borderRadius: BorderRadius.circular(12),
-                              border: Border.all(color: isSelected ? Theme.of(context).primaryColor : Colors.transparent),
+                              border: Border.all(
+                                color: isSelected
+                                    ? Theme.of(context).primaryColor
+                                    : Colors.transparent,
+                              ),
                             ),
                             alignment: Alignment.center,
-                            child: Text(avatar, style: const TextStyle(fontSize: 24)),
+                            child: Text(
+                              avatar,
+                              style: const TextStyle(fontSize: 24),
+                            ),
                           ),
                         );
                       },
@@ -511,19 +700,35 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
     ref.listen(partyProvider, (previous, next) {
       if (next.error != null) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(next.error.toString()), backgroundColor: theme.colorScheme.error));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(next.error.toString()),
+            backgroundColor: theme.colorScheme.error,
+          ),
+        );
       }
       if (next.partyData != null && previous?.partyData != next.partyData) {
         if (ModalRoute.of(context)?.isCurrent != true) return;
         final socketId = ref.read(socketProvider).id;
         final isHost = next.isHost;
-        _analytics.setUserProperties(userId: socketId ?? 'unknown', role: isHost ? 'host' : 'guest');
+        _analytics.setUserProperties(
+          userId: socketId ?? 'unknown',
+          role: isHost ? 'host' : 'guest',
+        );
         if (isHost) {
           _analytics.logPartyCreated(next.partyId ?? '');
         } else {
           _analytics.logPartyJoined(next.partyId ?? '');
         }
-        Navigator.push(context, MaterialPageRoute(builder: (_) => WaitingScreen(party: next.partyData!, username: "${userState.avatar} ${userState.username}")));
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => WaitingScreen(
+              party: next.partyData!,
+              username: "${userState.avatar} ${userState.username}",
+            ),
+          ),
+        );
       }
     });
 
@@ -541,23 +746,41 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           child: Row(
             children: [
               Container(
-                width: 36, 
+                width: 36,
                 height: 36,
                 alignment: Alignment.center,
                 decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.1),
+                  color: Colors.white.withValues(alpha: 0.1),
                   shape: BoxShape.circle,
-                  border: Border.all(color: Colors.white.withOpacity(0.2)),
+                  border: Border.all(
+                    color: Colors.white.withValues(alpha: 0.2),
+                  ),
                 ),
-                child: Text(userState.avatar, style: const TextStyle(fontSize: 20)),
+                child: Text(
+                  userState.avatar,
+                  style: const TextStyle(fontSize: 20),
+                ),
               ),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text("Hello, ${userState.username.isEmpty ? 'Guest' : userState.username}", style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.white)),
-                    Text("Ready to jam?", style: TextStyle(fontSize: 10, color: Colors.white.withOpacity(0.6))),
+                    Text(
+                      "Hello, ${userState.username.isEmpty ? 'Guest' : userState.username}",
+                      style: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white,
+                      ),
+                    ),
+                    Text(
+                      "Ready to jam?",
+                      style: TextStyle(
+                        fontSize: 10,
+                        color: Colors.white.withValues(alpha: 0.6),
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -567,7 +790,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         actions: [
           IconButton(
             icon: const Icon(Icons.settings_outlined, color: Colors.white),
-            onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsScreen())),
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const SettingsScreen()),
+            ),
           ),
           const SizedBox(width: 8),
         ],
@@ -588,7 +814,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 const SizedBox(height: 20),
-                
+
                 // 1. Resume Card (Top Priority)
                 if (partyState.lastPartyId != null && !partyState.connecting)
                   Padding(
@@ -597,27 +823,26 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                       partyId: partyState.lastPartyId!,
                       isHost: partyState.isHost,
                       onHostRejoin: () {
-                         final username = nameCtrl.text.trim();
-                         ref.read(partyProvider.notifier).reconnectAsHost(
-                           partyId: partyState.lastPartyId!,
-                           username: username.isEmpty ? "Host" : username,
-                           avatar: userState.avatar,
-                         );
+                        final username = nameCtrl.text.trim();
+                        ref
+                            .read(partyProvider.notifier)
+                            .reconnectAsHost(
+                              partyId: partyState.lastPartyId!,
+                              username: username.isEmpty ? "Host" : username,
+                              avatar: userState.avatar,
+                            );
                       },
                       onGuestRejoin: () {
                         codeCtrl.text = partyState.lastPartyId!;
                         _joinParty();
                       },
-                      onDismiss: () => ref.read(partyProvider.notifier).clearSession(),
+                      onDismiss: () =>
+                          ref.read(partyProvider.notifier).clearSession(),
                     ),
                   ),
 
                 // 2. Main Hero Action (Host Party)
-                Expanded(
-                  child: Center(
-                    child: _buildHeroCard(context),
-                  ),
-                ),
+                Expanded(child: Center(child: _buildHeroCard(context))),
 
                 const SizedBox(height: 24),
 
@@ -633,10 +858,22 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                         color: const Color(0xFF00D2FF),
                         onTap: () {
                           if (!_ensureNameSet(() {
-                            Navigator.push(context, MaterialPageRoute(builder: (_) => const ExploreScreen()));
-                          })) return;
-                          
-                          Navigator.push(context, MaterialPageRoute(builder: (_) => const ExploreScreen()));
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => const ExploreScreen(),
+                              ),
+                            );
+                          })) {
+                            return;
+                          }
+
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => const ExploreScreen(),
+                            ),
+                          );
                         },
                       ),
                     ),
@@ -658,14 +895,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
                 // 4. Join Section (Modern Pill)
                 _buildJoinPill(context, theme),
-                
+
                 const SizedBox(height: 24),
-                
-                // Name Input (Hidden but functional for state)
-                SizedBox(
-                   height: 0, 
-                   child: TextField(controller: nameCtrl), 
-                ),
               ],
             ),
           ),
@@ -675,60 +906,108 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   }
 
   Widget _buildHeroCard(BuildContext context) {
-    return GestureDetector(
-      onTap: _showCreatePartyDialog,
-      child: Container(
-        height: 180,
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(24),
-          gradient: const LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [Color(0xFF6C63FF), Color(0xFF4834D4)],
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: const Color(0xFF6C63FF).withOpacity(0.4),
-              blurRadius: 20,
-              offset: const Offset(0, 8),
-            ),
-          ],
-        ),
-        child: Stack(
-          children: [
-            Positioned(
-              right: -20,
-              bottom: -20,
-              child: Icon(Icons.music_note_rounded, size: 140, color: Colors.white.withOpacity(0.1)),
-            ),
-            Padding(
-              padding: const EdgeInsets.all(24),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.2),
-                      shape: BoxShape.circle,
+    final theme = Theme.of(context);
+    final primary = theme.primaryColor;
+
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: 0.98, end: 1),
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeOut,
+      builder: (context, value, child) {
+        return Transform.scale(
+          scale: value,
+          child: GestureDetector(
+            onTapDown: (_) => HapticFeedback.selectionClick(),
+            onTap: _showCreatePartyDialog,
+            child: Container(
+              height: 170,
+              decoration: BoxDecoration(
+                color: const Color(0xFF151922),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    // Top accent bar
+                    Container(height: 3, color: primary.withValues(alpha: 0.9)),
+
+                    Expanded(
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 24,
+                          vertical: 20,
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            // Header Row
+                            Row(
+                              children: [
+                                Icon(
+                                  Icons.queue_music_rounded,
+                                  color: primary,
+                                  size: 26,
+                                ),
+                                const SizedBox(width: 12),
+                                const Text(
+                                  "New Session",
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 14,
+                                    letterSpacing: 1.4,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                                const Spacer(),
+                                Icon(
+                                  Icons.arrow_forward_rounded,
+                                  color: Colors.white.withValues(alpha: 0.4),
+                                ),
+                              ],
+                            ),
+
+                            const Spacer(),
+
+                            // Title
+                            const Text(
+                              "Host a Party",
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 26,
+                                fontWeight: FontWeight.bold,
+                                height: 1.1,
+                              ),
+                            ),
+
+                            const SizedBox(height: 6),
+
+                            // Subtitle
+                            Text(
+                              "Create a party and invite your friends who you vibe with.",
+                              style: TextStyle(
+                                color: Colors.white.withValues(alpha: 0.55),
+                                fontSize: 13,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
                     ),
-                    child: const Icon(Icons.add_rounded, color: Colors.white, size: 32),
-                  ),
-                  const Spacer(),
-                  const Text("Host a Party", style: TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 4),
-                  Text("Be the DJ. Control the vibe.", style: TextStyle(color: Colors.white.withOpacity(0.8), fontSize: 14)),
-                ],
+                  ],
+                ),
               ),
             ),
-          ],
-        ),
-      ),
+          ),
+        );
+      },
     );
   }
 
-  Widget _buildActionCard(BuildContext context, {
+  Widget _buildActionCard(
+    BuildContext context, {
     required String title,
     required String subtitle,
     required IconData icon,
@@ -742,16 +1021,29 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         decoration: BoxDecoration(
           color: const Color(0xFF151922),
           borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: Colors.white.withOpacity(0.05)),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.05)),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Icon(icon, color: color, size: 28),
             const SizedBox(height: 12),
-            Text(title, style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+            Text(
+              title,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
             const SizedBox(height: 2),
-            Text(subtitle, style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 11)),
+            Text(
+              subtitle,
+              style: TextStyle(
+                color: Colors.white.withValues(alpha: 0.5),
+                fontSize: 11,
+              ),
+            ),
           ],
         ),
       ),
@@ -764,7 +1056,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       decoration: BoxDecoration(
         color: const Color(0xFF151922),
         borderRadius: BorderRadius.circular(50),
-        border: Border.all(color: Colors.white.withOpacity(0.08)),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
       ),
       child: Row(
         children: [
@@ -774,10 +1066,17 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               child: TextField(
                 controller: codeCtrl,
                 textCapitalization: TextCapitalization.characters,
-                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, letterSpacing: 1),
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 1,
+                ),
                 decoration: InputDecoration(
                   hintText: "Enter Party Code...",
-                  hintStyle: TextStyle(color: Colors.white.withOpacity(0.3), fontSize: 14),
+                  hintStyle: TextStyle(
+                    color: Colors.white.withValues(alpha: 0.3),
+                    fontSize: 14,
+                  ),
                   border: InputBorder.none,
                   enabledBorder: InputBorder.none,
                   focusedBorder: InputBorder.none,

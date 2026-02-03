@@ -65,9 +65,9 @@ class AppTheme {
           borderRadius: BorderRadius.circular(16),
           borderSide: const BorderSide(color: primary, width: 1.5),
         ),
-        hintStyle: TextStyle(color: onSurface.withOpacity(0.4)),
+        hintStyle: TextStyle(color: onSurface.withValues(alpha:0.4)),
         contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
-        prefixIconColor: onSurface.withOpacity(0.6),
+        prefixIconColor: onSurface.withValues(alpha:0.6),
       ),
       pageTransitionsTheme: const PageTransitionsTheme(
         builders: {

@@ -10,6 +10,7 @@ import 'package:sync_music/onboarding_screen.dart';
 import 'package:sync_music/theme/app_theme.dart';
 import 'package:sync_music/services/remote_config_service.dart';
 import 'package:sync_music/services/notification_service.dart';
+import 'package:sync_music/providers/socket_provider.dart';
 import 'firebase_options.dart';
 
 void main() async {
@@ -51,9 +52,47 @@ void main() async {
 }
 
 // ---------------- APP ROOT ----------------
-class PartyApp extends StatelessWidget {
+class PartyApp extends ConsumerStatefulWidget {
   final bool showOnboarding;
   const PartyApp({super.key, required this.showOnboarding});
+
+  @override
+  ConsumerState<PartyApp> createState() => _PartyAppState();
+}
+
+class _PartyAppState extends ConsumerState<PartyApp> with WidgetsBindingObserver {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    if (state == AppLifecycleState.resumed) {
+      debugPrint("App resumed: Checking socket connection...");
+      try {
+        // We defer the read slightly to ensure the provider scope is ready if needed,
+        // though typically it is available here.
+        final socket = ref.read(socketProvider);
+        if (!socket.connected) {
+          debugPrint("Socket disconnected. Attempting to reconnect...");
+          socket.connect();
+        } else {
+          debugPrint("Socket is already connected.");
+        }
+      } catch (e) {
+        debugPrint("Error handling resume socket check: $e");
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -61,7 +100,7 @@ class PartyApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       title: 'Sync Music',
       theme: AppTheme.darkTheme,
-      home: showOnboarding ? const OnboardingScreen() : const HomeScreen(),
+      home: widget.showOnboarding ? const OnboardingScreen() : const HomeScreen(),
     );
   }
 }

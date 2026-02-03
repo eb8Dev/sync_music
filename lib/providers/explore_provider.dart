@@ -16,7 +16,7 @@ class ExploreState {
   }
 }
 
-class ExploreNotifier extends AutoDisposeNotifier<ExploreState> {
+class ExploreNotifier extends Notifier<ExploreState> {
   late IO.Socket _socket;
 
   @override
@@ -40,4 +40,4 @@ class ExploreNotifier extends AutoDisposeNotifier<ExploreState> {
   }
 }
 
-final exploreProvider = AutoDisposeNotifierProvider<ExploreNotifier, ExploreState>(ExploreNotifier.new);
+final exploreProvider = NotifierProvider<ExploreNotifier, ExploreState>(ExploreNotifier.new);

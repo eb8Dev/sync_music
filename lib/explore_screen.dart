@@ -134,8 +134,8 @@ class _ExploreScreenState extends ConsumerState<ExploreScreen> {
                                     shape: BoxShape.circle,
                                     gradient: LinearGradient(
                                       colors: [
-                                        theme.primaryColor.withOpacity(0.8),
-                                        theme.primaryColor.withOpacity(0.4),
+                                        theme.primaryColor.withValues(alpha:0.8),
+                                        theme.primaryColor.withValues(alpha:0.4),
                                       ],
                                     ),
                                   ),
@@ -171,7 +171,7 @@ class _ExploreScreenState extends ConsumerState<ExploreScreen> {
                                         maxLines: 1,
                                         overflow: TextOverflow.ellipsis,
                                         style: TextStyle(
-                                          color: Colors.white.withOpacity(0.6),
+                                          color: Colors.white.withValues(alpha:0.6),
                                           fontSize: 12,
                                         ),
                                       ),
@@ -191,7 +191,7 @@ class _ExploreScreenState extends ConsumerState<ExploreScreen> {
                                         vertical: 4,
                                       ),
                                       decoration: BoxDecoration(
-                                        color: theme.primaryColor.withOpacity(
+                                        color: theme.primaryColor.withValues(alpha:
                                           0.15,
                                         ),
                                         borderRadius: BorderRadius.circular(12),
@@ -219,7 +219,7 @@ class _ExploreScreenState extends ConsumerState<ExploreScreen> {
                                     Icon(
                                       Icons.arrow_forward_ios_rounded,
                                       size: 14,
-                                      color: Colors.white.withOpacity(0.3),
+                                      color: Colors.white.withValues(alpha:0.3),
                                     ),
                                   ],
                                 ),
@@ -356,9 +356,9 @@ class _ShimmerBoxState extends State<_ShimmerBox>
               begin: Alignment.centerLeft,
               end: Alignment.centerRight,
               colors: [
-                Colors.white.withOpacity(0.06),
-                Colors.white.withOpacity(0.14),
-                Colors.white.withOpacity(0.06),
+                Colors.white.withValues(alpha:0.06),
+                Colors.white.withValues(alpha:0.14),
+                Colors.white.withValues(alpha:0.06),
               ],
               stops: const [0.25, 0.5, 0.75],
               transform: _SlidingGradientTransform(
@@ -370,7 +370,7 @@ class _ShimmerBoxState extends State<_ShimmerBox>
             width: widget.width,
             height: widget.height,
             decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.08),
+              color: Colors.white.withValues(alpha:0.08),
               borderRadius: widget.borderRadius,
             ),
           ),
@@ -409,13 +409,13 @@ class _EmptyState extends StatelessWidget {
           Icon(
             Icons.queue_music_rounded,
             size: 64,
-            color: Colors.white.withOpacity(0.25),
+            color: Colors.white.withValues(alpha:0.25),
           ),
           const SizedBox(height: 16),
           Text(
             "No public parties right now",
             style: TextStyle(
-              color: Colors.white.withOpacity(0.6),
+              color: Colors.white.withValues(alpha:0.6),
               fontSize: 16,
               fontWeight: FontWeight.w600,
             ),
@@ -424,7 +424,7 @@ class _EmptyState extends StatelessWidget {
           Text(
             "Start one and invite your friends 🎶",
             style: TextStyle(
-              color: Colors.white.withOpacity(0.4),
+              color: Colors.white.withValues(alpha:0.4),
               fontSize: 12,
             ),
           ),

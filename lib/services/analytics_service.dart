@@ -19,6 +19,14 @@ class AnalyticsService {
     await logEvent('song_added', parameters: {'song_title': title});
   }
 
+  Future<void> logViewHomeScreen() async {
+    await logEvent('view_home_screen');
+  }
+
+  Future<void> logCampaignTrigger(String campaignName) async {
+    await logEvent('trigger_campaign', parameters: {'campaign_name': campaignName});
+  }
+
   Future<void> setUserProperties({required String userId, String? role}) async {
     await _analytics.setUserId(id: userId);
     if (role != null) {

@@ -9,8 +9,13 @@ import 'package:youtube_player_flutter/youtube_player_flutter.dart';
 
 class PartyPlayer extends ConsumerStatefulWidget {
   final String partyId;
+  final bool isFullScreen;
 
-  const PartyPlayer({super.key, required this.partyId});
+  const PartyPlayer({
+    super.key,
+    required this.partyId,
+    this.isFullScreen = false,
+  });
 
   @override
   ConsumerState<PartyPlayer> createState() => _PartyPlayerState();
@@ -62,11 +67,18 @@ class _PartyPlayerState extends ConsumerState<PartyPlayer> {
         _controller!.dispose();
         _controller = null;
       }
+      final emptyWidget = NeonEmptyState(isEndOfQueue: isEndOfQueue);
+      
+      if (widget.isFullScreen) {
+        return Container(
+          color: Colors.black,
+          child: Center(child: emptyWidget),
+        );
+      }
+
       return AspectRatio(
         aspectRatio: 16 / 9,
-        child: _buildGlassContainer(
-           child: NeonEmptyState(isEndOfQueue: isEndOfQueue),
-        ),
+        child: _buildGlassContainer(child: emptyWidget),
       );
     }
 
@@ -84,13 +96,6 @@ class _PartyPlayerState extends ConsumerState<PartyPlayer> {
     }
 
     // Imperative Sync Logic
-    // We do this in build or listener. 
-    // Doing it here ensures if parent rebuilds we re-check state.
-    // However, calling seekTo/play repeatedly in build is bad.
-    // We should use a side-effect listener or check if state actually diverged.
-    // For this refactor, we rely on the controller's internal state vs provided state.
-    
-    // Actually, listening to state changes for imperative logic (seek/play) is better done via ref.listen
     ref.listen(partyStateProvider, (prev, next) {
       if (_controller == null) return;
       if (!next.isPlaying && _controller!.value.isPlaying) {
@@ -111,6 +116,35 @@ class _PartyPlayerState extends ConsumerState<PartyPlayer> {
       }
     });
 
+    final playerWidget = YoutubePlayer(
+      key: ValueKey(videoId), // Force rebuild if ID changes
+      controller: _controller!,
+      showVideoProgressIndicator: true,
+      progressIndicatorColor: Theme.of(context).colorScheme.primary,
+      onEnded: (_) {
+        if (isHost && _lastEndedIndex != currentIndex) {
+          _lastEndedIndex = currentIndex;
+          ref.read(partyStateProvider.notifier).endTrack(widget.partyId);
+        }
+      },
+      onReady: () {
+        // Initial sync on load
+        if (isPlaying) {
+          int startSeconds = 0;
+          final now = DateTime.now().millisecondsSinceEpoch;
+          if (startedAt != null && now > startedAt) {
+            startSeconds = (now - startedAt) ~/ 1000;
+          }
+          _controller!.seekTo(Duration(seconds: startSeconds));
+          _controller!.play();
+        }
+      },
+    );
+
+    if (widget.isFullScreen) {
+      return playerWidget;
+    }
+
     return AspectRatio(
       aspectRatio: 16 / 9,
       child: _buildGlassContainer(
@@ -118,30 +152,7 @@ class _PartyPlayerState extends ConsumerState<PartyPlayer> {
             ? const NeonLoader()
             : ClipRRect(
                 borderRadius: BorderRadius.circular(20),
-                child: YoutubePlayer(
-                  key: ValueKey(videoId), // Force rebuild if ID changes
-                  controller: _controller!,
-                  showVideoProgressIndicator: true,
-                  progressIndicatorColor: Theme.of(context).colorScheme.primary,
-                  onEnded: (_) {
-                    if (isHost && _lastEndedIndex != currentIndex) {
-                      _lastEndedIndex = currentIndex;
-                      ref.read(partyStateProvider.notifier).endTrack(widget.partyId);
-                    }
-                  },
-                  onReady: () {
-                    // Initial sync on load
-                    if (isPlaying) {
-                      int startSeconds = 0;
-                      final now = DateTime.now().millisecondsSinceEpoch;
-                      if (startedAt != null && now > startedAt) {
-                        startSeconds = (now - startedAt) ~/ 1000;
-                      }
-                      _controller!.seekTo(Duration(seconds: startSeconds));
-                      _controller!.play();
-                    }
-                  },
-                ),
+                child: playerWidget,
               ),
       ),
     );
@@ -167,14 +178,14 @@ class _PartyPlayerState extends ConsumerState<PartyPlayer> {
             filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
             child: Container(
               decoration: BoxDecoration(
-                color: Colors.black.withOpacity(0.35),
+                color: Colors.black.withValues(alpha:0.35),
                 borderRadius: BorderRadius.circular(24),
                 // border: Border.all(
-                //   color: Theme.of(context).colorScheme.primary.withOpacity(0.25),
+                //   color: Theme.of(context).colorScheme.primary.withValues(alpha:0.25),
                 // ),
                 boxShadow: [
                   BoxShadow(
-                    color: Theme.of(context).colorScheme.primary.withOpacity(0.35),
+                    color: Theme.of(context).colorScheme.primary.withValues(alpha:0.35),
                     blurRadius: 30,
                     spreadRadius: 2,
                   ),

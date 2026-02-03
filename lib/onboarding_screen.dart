@@ -101,10 +101,10 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                             padding: const EdgeInsets.all(24),
                             decoration: BoxDecoration(
                               shape: BoxShape.circle,
-                              color: theme.primaryColor.withOpacity(0.1),
+                              color: theme.primaryColor.withValues(alpha:0.1),
                               boxShadow: [
                                 BoxShadow(
-                                  color: theme.primaryColor.withOpacity(0.2),
+                                  color: theme.primaryColor.withValues(alpha:0.2),
                                   blurRadius: 30,
                                   spreadRadius: 5,
                                 ),
@@ -133,7 +133,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                             style: TextStyle(
                               fontSize: 16,
                               height: 1.6,
-                              color: Colors.white.withOpacity(0.7),
+                              color: Colors.white.withValues(alpha:0.7),
                             ),
                             textAlign: TextAlign.center,
                           ),
@@ -181,7 +181,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                         borderRadius: BorderRadius.circular(18),
                       ),
                       elevation: 8,
-                      shadowColor: theme.primaryColor.withOpacity(0.4),
+                      shadowColor: theme.primaryColor.withValues(alpha:0.4),
                     ),
                     onPressed: _currentPage == _pages.length - 1
                         ? _finishOnboarding

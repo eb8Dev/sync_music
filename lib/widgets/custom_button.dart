@@ -70,7 +70,7 @@ class CustomButton extends StatelessWidget {
             },
       style: ElevatedButton.styleFrom(
         elevation: variant == ButtonVariant.primary ? 8 : 0,
-        shadowColor: variant == ButtonVariant.primary ? backgroundColor.withOpacity(0.4) : Colors.transparent,
+        shadowColor: variant == ButtonVariant.primary ? backgroundColor.withValues(alpha:0.4) : Colors.transparent,
         backgroundColor: backgroundColor,
         foregroundColor: foregroundColor,
         disabledBackgroundColor:

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:sync_music/party_screen.dart';
+import 'package:sync_music/movie_party_screen.dart';
 import 'package:sync_music/providers/party_provider.dart';
 import 'package:sync_music/providers/party_state_provider.dart';
 import 'package:sync_music/providers/user_provider.dart';
@@ -45,13 +46,20 @@ class _WaitingScreenState extends ConsumerState<WaitingScreen> {
       // If party is already playing, navigate to PartyScreen immediately
       if (widget.party["isPlaying"] == true) {
         final userState = ref.read(userProvider);
+        final mode = widget.party["mode"] ?? "party";
+
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(
-            builder: (_) => PartyScreen(
-              party: widget.party,
-              username: "${userState.avatar} ${userState.username}",
-            ),
+            builder: (_) => mode == "movie"
+                ? MoviePartyScreen(
+                    party: widget.party,
+                    username: "${userState.avatar} ${userState.username}",
+                  )
+                : PartyScreen(
+                    party: widget.party,
+                    username: "${userState.avatar} ${userState.username}",
+                  ),
           ),
         );
       }
@@ -59,34 +67,58 @@ class _WaitingScreenState extends ConsumerState<WaitingScreen> {
   }
 
   void _showQRCode() {
-    showDialog(
+    showModalBottomSheet(
       context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: const Color(0xFF1E1E1E),
-        title: const Text(
-          "Scan to Join",
-          style: TextStyle(color: Colors.white),
-          textAlign: TextAlign.center,
-        ),
-        content: SizedBox(
-          width: 250,
-          height: 250,
-          child: Center(
-            child: QrImageView(
-              data: widget.party["id"],
-              version: QrVersions.auto,
-              size: 250.0,
-              backgroundColor: Colors.white,
-              padding: const EdgeInsets.all(16),
+      backgroundColor: const Color(0xFF1E1E1E),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => Padding(
+        padding: const EdgeInsets.all(24.0),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              "Scan to Join",
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+              ),
             ),
-          ),
+            const SizedBox(height: 24),
+            Container(
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(16),
+              ),
+              padding: const EdgeInsets.all(16),
+              child: QrImageView(
+                data: "syncmusic://join/${widget.party["id"]}",
+                version: QrVersions.auto,
+                size: 200.0,
+                backgroundColor: Colors.white,
+              ),
+            ),
+            const SizedBox(height: 24),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: () => Navigator.pop(context),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Theme.of(context).primaryColor,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+                child: const Text("Close"),
+              ),
+            ),
+            const SizedBox(height: 16),
+          ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text("Close"),
-          ),
-        ],
       ),
     );
   }
@@ -163,7 +195,7 @@ class _WaitingScreenState extends ConsumerState<WaitingScreen> {
     if (isDuplicate) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text("This song is already in the queue!"),
+          content: Text("This video is already in the queue!"),
           backgroundColor: Colors.orange,
         ),
       );
@@ -197,18 +229,26 @@ class _WaitingScreenState extends ConsumerState<WaitingScreen> {
   Widget build(BuildContext context) {
     final partyState = ref.watch(partyStateProvider);
     final bool isHost = ref.watch(partyProvider).isHost;
+    final mode = widget.party["mode"] ?? "party";
+    final isMovieMode = mode == "movie";
 
     // Listen for playback start to navigate to PartyScreen
     ref.listen(partyStateProvider, (previous, next) {
       if (next.isPlaying && (previous == null || !previous.isPlaying)) {
         final userState = ref.read(userProvider);
+        
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(
-            builder: (_) => PartyScreen(
-              party: widget.party,
-              username: "${userState.avatar} ${userState.username}",
-            ),
+            builder: (_) => isMovieMode 
+                ? MoviePartyScreen(
+                    party: widget.party,
+                    username: "${userState.avatar} ${userState.username}",
+                  )
+                : PartyScreen(
+                    party: widget.party,
+                    username: "${userState.avatar} ${userState.username}",
+                  ),
           ),
         );
       }
@@ -246,7 +286,7 @@ class _WaitingScreenState extends ConsumerState<WaitingScreen> {
                           Text(
                             "PARTY CODE",
                             style: TextStyle(
-                              color: Colors.white.withOpacity(0.5),
+                              color: Colors.white.withValues(alpha:0.5),
                               fontSize: 10,
                               fontWeight: FontWeight.bold,
                               letterSpacing: 1.5,
@@ -304,17 +344,17 @@ class _WaitingScreenState extends ConsumerState<WaitingScreen> {
                                 padding: const EdgeInsets.all(24),
                                 decoration: BoxDecoration(
                                   shape: BoxShape.circle,
-                                  color: Theme.of(context).primaryColor.withOpacity(0.1),
+                                  color: Theme.of(context).primaryColor.withValues(alpha:0.1),
                                   boxShadow: [
                                     BoxShadow(
-                                      color: Theme.of(context).primaryColor.withOpacity(0.2),
+                                      color: Theme.of(context).primaryColor.withValues(alpha:0.2),
                                       blurRadius: 40,
                                       spreadRadius: 10,
                                     ),
                                   ],
                                 ),
                                 child: Icon(
-                                  isHost ? Icons.headphones_rounded : Icons.headset_mic_rounded,
+                                  isMovieMode ? Icons.movie_filter_rounded : (isHost ? Icons.headphones_rounded : Icons.headset_mic_rounded),
                                   size: 64,
                                   color: Theme.of(context).primaryColor,
                                 ),
@@ -331,11 +371,11 @@ class _WaitingScreenState extends ConsumerState<WaitingScreen> {
                               const SizedBox(height: 8),
                               Text(
                                 isHost
-                                    ? "Add songs to the queue to start."
+                                    ? "Add ${isMovieMode ? 'videos' : 'songs'} to the queue to start."
                                     : "Sit tight! The party will start soon.",
                                 textAlign: TextAlign.center,
                                 style: TextStyle(
-                                  color: Colors.white.withOpacity(0.6),
+                                  color: Colors.white.withValues(alpha:0.6),
                                   fontSize: 14,
                                 ),
                               ),
@@ -361,7 +401,7 @@ class _WaitingScreenState extends ConsumerState<WaitingScreen> {
                                         height: 40,
                                         alignment: Alignment.center,
                                         decoration: BoxDecoration(
-                                          color: Colors.white.withOpacity(0.1),
+                                          color: Colors.white.withValues(alpha:0.1),
                                           borderRadius: BorderRadius.circular(8),
                                         ),
                                         child: Text(
@@ -391,7 +431,7 @@ class _WaitingScreenState extends ConsumerState<WaitingScreen> {
                                             Text(
                                               "Added by ${track["addedBy"] ?? 'Unknown'}",
                                               style: TextStyle(
-                                                color: Theme.of(context).primaryColor.withOpacity(0.8),
+                                                color: Theme.of(context).primaryColor.withValues(alpha:0.8),
                                                 fontSize: 11,
                                               ),
                                             ),
@@ -415,7 +455,7 @@ class _WaitingScreenState extends ConsumerState<WaitingScreen> {
                     borderRadius: const BorderRadius.vertical(top: Radius.circular(32)),
                     boxShadow: [
                       BoxShadow(
-                        color: Colors.black.withOpacity(0.4),
+                        color: Colors.black.withValues(alpha:0.4),
                         blurRadius: 20,
                         offset: const Offset(0, -5),
                       ),
@@ -428,9 +468,9 @@ class _WaitingScreenState extends ConsumerState<WaitingScreen> {
                         onChanged: _onSearchChanged,
                         style: const TextStyle(color: Colors.white),
                         decoration: InputDecoration(
-                          hintText: "Add a song to queue...",
-                          hintStyle: TextStyle(color: Colors.white.withOpacity(0.4)),
-                          prefixIcon: Icon(Icons.search_rounded, color: Colors.white.withOpacity(0.4)),
+                          hintText: isMovieMode ? "Add a movie to queue..." : "Add a song to queue...",
+                          hintStyle: TextStyle(color: Colors.white.withValues(alpha:0.4)),
+                          prefixIcon: Icon(Icons.search_rounded, color: Colors.white.withValues(alpha:0.4)),
                           suffixIcon: isSearching
                               ? Padding(
                                   padding: const EdgeInsets.all(12),
@@ -445,7 +485,7 @@ class _WaitingScreenState extends ConsumerState<WaitingScreen> {
                                 )
                               : null,
                           filled: true,
-                          fillColor: Colors.white.withOpacity(0.05),
+                          fillColor: Colors.white.withValues(alpha:0.05),
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(16),
                             borderSide: BorderSide.none,
@@ -459,14 +499,14 @@ class _WaitingScreenState extends ConsumerState<WaitingScreen> {
                           constraints: const BoxConstraints(maxHeight: 220),
                           margin: const EdgeInsets.only(top: 12),
                           decoration: BoxDecoration(
-                            color: Colors.white.withOpacity(0.05),
+                            color: Colors.white.withValues(alpha:0.05),
                             borderRadius: BorderRadius.circular(16),
                           ),
                           child: ListView.separated(
                             padding: EdgeInsets.zero,
                             shrinkWrap: true,
                             itemCount: searchResults.length,
-                            separatorBuilder: (_, __) => Divider(height: 1, color: Colors.white.withOpacity(0.05)),
+                            separatorBuilder: (_, _) => Divider(height: 1, color: Colors.white.withValues(alpha:0.05)),
                             itemBuilder: (_, i) {
                               final video = searchResults[i];
                               return ListTile(
@@ -506,7 +546,7 @@ class _WaitingScreenState extends ConsumerState<WaitingScreen> {
                                 borderRadius: BorderRadius.circular(16),
                               ),
                               elevation: 8,
-                              shadowColor: Theme.of(context).primaryColor.withOpacity(0.4),
+                              shadowColor: Theme.of(context).primaryColor.withValues(alpha:0.4),
                             ),
                             child: const Text(
                               "START PARTY",
@@ -583,10 +623,10 @@ class _HeaderActionButton extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.all(10),
         decoration: BoxDecoration(
-          color: isPrimary ? Theme.of(context).primaryColor : Colors.white.withOpacity(0.05),
+          color: isPrimary ? Theme.of(context).primaryColor : Colors.white.withValues(alpha:0.05),
           borderRadius: BorderRadius.circular(12),
           border: Border.all(
-            color: isPrimary ? Colors.transparent : Colors.white.withOpacity(0.1),
+            color: isPrimary ? Colors.transparent : Colors.white.withValues(alpha:0.1),
           ),
         ),
         child: Icon(

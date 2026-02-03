@@ -8,6 +8,7 @@ import 'package:sync_music/providers/socket_provider.dart';
 import 'package:sync_music/widgets/floating_emojis.dart';
 import 'package:sync_music/widgets/party_chat.dart';
 import 'package:sync_music/widgets/party_controls.dart';
+import 'package:sync_music/widgets/party_lyrics.dart';
 import 'package:sync_music/widgets/party_player.dart';
 import 'package:sync_music/widgets/party_queue.dart';
 import 'package:sync_music/services/youtube_service.dart';
@@ -15,6 +16,7 @@ import 'package:youtube_explode_dart/youtube_explode_dart.dart' as yt;
 import 'package:wakelock_plus/wakelock_plus.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:qr_flutter/qr_flutter.dart';
+import 'package:sync_music/widgets/exit_confirmation_dialog.dart';
 
 class PartyScreen extends ConsumerStatefulWidget {
   final Map<String, dynamic> party;
@@ -30,17 +32,20 @@ class _PartyScreenState extends ConsumerState<PartyScreen>
     with SingleTickerProviderStateMixin {
   final YouTubeService _ytService = YouTubeService();
   final TextEditingController searchCtrl = TextEditingController();
-  
+
   Timer? _debounce;
   List<yt.Video> searchResults = [];
   bool isSearching = false;
+  bool isPlaylistDetected = false;
+  bool _canPop = false;
 
   late TabController _tabController;
   int _unreadMessages = 0;
 
-  final StreamController<String> _reactionStreamCtrl = StreamController<String>.broadcast();
+  final StreamController<String> _reactionStreamCtrl =
+      StreamController<String>.broadcast();
 
-static const List<LinearGradient> _themes = [
+  static const List<LinearGradient> _themes = [
     // 1. Midnight (The Original Reference)
     LinearGradient(
       begin: Alignment.topCenter,
@@ -51,37 +56,35 @@ static const List<LinearGradient> _themes = [
     LinearGradient(
       begin: Alignment.topLeft,
       end: Alignment.bottomRight,
-      colors: [Color(0xFF2E0249), Color(0xFF6C63FF)], 
+      colors: [Color(0xFF2E0249), Color(0xFF6C63FF)],
     ),
     // 3. Ocean Depths
     LinearGradient(
       begin: Alignment.topRight,
       end: Alignment.bottomLeft,
-      colors: [Color(0xFF0F2027), Color(0xFF203A43)], 
+      colors: [Color(0xFF0F2027), Color(0xFF203A43)],
     ),
     // 4. Crimson Night
     LinearGradient(
       begin: Alignment.topCenter,
       end: Alignment.bottomCenter,
-      colors: [Color(0xFF2C0404), Color(0xFF8A0808)], 
+      colors: [Color(0xFF2C0404), Color(0xFF8A0808)],
     ),
     // 5. Cyberpunk
     LinearGradient(
       begin: Alignment.topLeft,
       end: Alignment.bottomRight,
-      colors: [Color(0xFF000000), Color(0xFF0B3D35)], 
+      colors: [Color(0xFF000000), Color(0xFF0B3D35)],
     ),
-];
+  ];
 
   @override
   void initState() {
     super.initState();
     WakelockPlus.enable();
-    
-    // Initialize Notifier with passed data to avoid empty flash
-    // Future.microtask(() => ref.read(partyStateProvider.notifier).init(widget.party));
 
-    _tabController = TabController(length: 2, vsync: this);
+    // 3 Tabs: Queue, Lyrics, Chat
+    _tabController = TabController(length: 3, vsync: this);
     _tabController.addListener(_handleTabSelection);
 
     // Subscribe to reactions
@@ -92,7 +95,8 @@ static const List<LinearGradient> _themes = [
   }
 
   void _handleTabSelection() {
-    if (_tabController.index == 1) {
+    // If Chat tab (index 2) is selected, clear unread
+    if (_tabController.index == 2) {
       setState(() {
         _unreadMessages = 0;
       });
@@ -106,18 +110,28 @@ static const List<LinearGradient> _themes = [
 
   void _onPartyEnded(data) {
     if (!mounted) return;
-    Navigator.popUntil(context, (route) => route.isFirst);
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(data['message'] ?? "Party Ended")),
-    );
+    setState(() => _canPop = true);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        Navigator.popUntil(context, (route) => route.isFirst);
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(data['message'] ?? "Party Ended")));
+      }
+    });
   }
 
   void _onKicked(data) {
     if (!mounted) return;
-    Navigator.popUntil(context, (route) => route.isFirst);
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text("You have been kicked from the party.")),
-    );
+    setState(() => _canPop = true);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        Navigator.popUntil(context, (route) => route.isFirst);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("You have been kicked from the party.")),
+        );
+      }
+    });
   }
 
   @override
@@ -140,11 +154,27 @@ static const List<LinearGradient> _themes = [
   // ---- SEARCH LOGIC ----
   void _onSearchChanged(String query) {
     if (_debounce?.isActive ?? false) _debounce!.cancel();
+
+    // Reset detection
+    if (isPlaylistDetected) {
+      setState(() => isPlaylistDetected = false);
+    }
+
     _debounce = Timer(const Duration(milliseconds: 600), () async {
       if (query.isEmpty) {
         setState(() => searchResults = []);
         return;
       }
+
+      // Check for Playlist Link
+      if (query.contains("list=") && query.contains("youtube.com")) {
+        setState(() {
+          isPlaylistDetected = true;
+          searchResults = []; // Clear video results to show import button
+        });
+        return;
+      }
+
       final results = await _ytService.searchVideos(query);
       if (mounted) {
         setState(() => searchResults = results);
@@ -152,15 +182,64 @@ static const List<LinearGradient> _themes = [
     });
   }
 
+  Future<void> _importPlaylist() async {
+    final url = searchCtrl.text.trim();
+    if (url.isEmpty) return;
+    
+    // Unfocus and show loading state
+    FocusScope.of(context).unfocus();
+    setState(() {
+        isSearching = true; // Use searching flag to show spinner if needed
+        isPlaylistDetected = false; 
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text("Importing top 15 songs from playlist...")),
+    );
+
+    try {
+        final videos = await _ytService.getPlaylistVideos(url);
+        
+        // Add them one by one (or batch if backend supported it, but loop is fine for now)
+        int count = 0;
+        for (var video in videos) {
+            // Check playable logic? Maybe skip for speed, rely on later check
+            ref.read(partyStateProvider.notifier).addTrack(widget.party["id"], {
+                "url": video.url,
+                "title": video.title,
+                "addedBy": widget.username,
+            });
+            count++;
+            // Small delay to prevent flooding if socket is sensitive (optional)
+            await Future.delayed(const Duration(milliseconds: 50)); 
+        }
+
+        if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text("Successfully added $count songs!")),
+            );
+        }
+    } catch (e) {
+         if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text("Failed to import playlist.")),
+            );
+         }
+    } finally {
+        if (mounted) {
+             setState(() {
+                 isSearching = false;
+                 searchCtrl.clear();
+             });
+        }
+    }
+  }
+
   void _addVideo(yt.Video video) {
-    ref.read(partyStateProvider.notifier).addTrack(
-          widget.party["id"],
-          {
-            "url": video.url,
-            "title": video.title,
-            "addedBy": widget.username,
-          },
-        );
+    ref.read(partyStateProvider.notifier).addTrack(widget.party["id"], {
+      "url": video.url,
+      "title": video.title,
+      "addedBy": widget.username,
+    });
     searchCtrl.clear();
     setState(() => searchResults = []);
     FocusScope.of(context).unfocus();
@@ -188,18 +267,57 @@ static const List<LinearGradient> _themes = [
   }
 
   void _showQRCode() {
-    showDialog(
+    showModalBottomSheet(
       context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: Colors.white,
-        content: SizedBox(
-          width: 200,
-          height: 200,
-          child: QrImageView(
-            data: "syncmusic://join/${widget.party['id']}",
-            version: QrVersions.auto,
-            size: 200.0,
-          ),
+      backgroundColor: const Color(0xFF1E1E1E),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => Padding(
+        padding: const EdgeInsets.all(24.0),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              "Scan to Join",
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 24),
+            Container(
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(16),
+              ),
+              padding: const EdgeInsets.all(16),
+              child: QrImageView(
+                data: "syncmusic://join/${widget.party['id']}",
+                version: QrVersions.auto,
+                size: 200.0,
+                backgroundColor: Colors.white,
+              ),
+            ),
+            const SizedBox(height: 24),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: () => Navigator.pop(context),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Theme.of(context).primaryColor,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+                child: const Text("Close"),
+              ),
+            ),
+            const SizedBox(height: 16),
+          ],
         ),
       ),
     );
@@ -219,10 +337,12 @@ static const List<LinearGradient> _themes = [
       builder: (context) {
         return Consumer(
           builder: (context, ref, _) {
-            final members = ref.watch(partyStateProvider.select((s) => s.members));
+            final members = ref.watch(
+              partyStateProvider.select((s) => s.members),
+            );
             final isHost = ref.watch(partyProvider.select((s) => s.isHost));
             final socket = ref.read(socketProvider);
-            
+
             return Container(
               padding: const EdgeInsets.all(24.0),
               child: Column(
@@ -289,10 +409,12 @@ static const List<LinearGradient> _themes = [
                                         ),
                                         onPressed: () {
                                           Navigator.pop(context);
-                                          ref.read(partyStateProvider.notifier).kickUser(
-                                            widget.party['id'],
-                                            member['id'],
-                                          );
+                                          ref
+                                              .read(partyStateProvider.notifier)
+                                              .kickUser(
+                                                widget.party['id'],
+                                                member['id'],
+                                              );
                                         },
                                       )
                                     : null,
@@ -310,8 +432,10 @@ static const List<LinearGradient> _themes = [
   }
 
   void _sendReaction(String emoji) {
-     ref.read(partyStateProvider.notifier).sendReaction(widget.party["id"], emoji);
-     _reactionStreamCtrl.add(emoji); // Local feedback immediate
+    ref
+        .read(partyStateProvider.notifier)
+        .sendReaction(widget.party["id"], emoji);
+    _reactionStreamCtrl.add(emoji); // Local feedback immediate
   }
 
   // ---- BUILD HELPERS ----
@@ -321,13 +445,33 @@ static const List<LinearGradient> _themes = [
       color: Colors.transparent,
       child: Column(
         children: [
+          // ---- SPECIAL ACTIONS (Import) ----
+          if (isPlaylistDetected)
+            Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                        style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF6C63FF),
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.all(16),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                        ),
+                        onPressed: _importPlaylist,
+                        icon: const Icon(Icons.playlist_add_rounded),
+                        label: const Text("Import Playlist (Top 15 Songs)"),
+                    ),
+                ),
+            ),
+
           // ---- SEARCH RESULTS ----
-          if (searchCtrl.text.isNotEmpty)
+          if (searchCtrl.text.isNotEmpty && !isPlaylistDetected)
             Container(
               constraints: const BoxConstraints(maxHeight: 160),
               margin: const EdgeInsets.only(bottom: 10),
               decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.04),
+                color: Colors.white.withValues(alpha:0.04),
                 borderRadius: BorderRadius.circular(14),
               ),
               child: searchResults.isEmpty
@@ -338,7 +482,7 @@ static const List<LinearGradient> _themes = [
                           "No videos found",
                           style: TextStyle(
                             fontSize: 12,
-                            color: Colors.white.withOpacity(0.4),
+                            color: Colors.white.withValues(alpha:0.4),
                             letterSpacing: 0.3,
                           ),
                         ),
@@ -349,7 +493,7 @@ static const List<LinearGradient> _themes = [
                       itemCount: searchResults.length,
                       separatorBuilder: (_, __) => Divider(
                         height: 1,
-                        color: Colors.white.withOpacity(0.05),
+                        color: Colors.white.withValues(alpha:0.05),
                       ),
                       itemBuilder: (_, i) {
                         final video = searchResults[i];
@@ -398,20 +542,20 @@ static const List<LinearGradient> _themes = [
             textInputAction: TextInputAction.search,
             style: const TextStyle(color: Colors.white, fontSize: 13),
             decoration: InputDecoration(
-              hintText: "Search YouTube",
+              hintText: "Search YouTube or Paste Playlist Link",
               hintStyle: TextStyle(
-                color: Colors.white.withOpacity(0.4),
+                color: Colors.white.withValues(alpha:0.4),
                 fontSize: 12,
               ),
               filled: true,
-              fillColor: Colors.white.withOpacity(0.06),
+              fillColor: Colors.white.withValues(alpha:0.06),
               contentPadding: const EdgeInsets.symmetric(
                 horizontal: 16,
                 vertical: 12,
               ),
               prefixIcon: Icon(
                 Icons.search_rounded,
-                color: Colors.white.withOpacity(0.4),
+                color: Colors.white.withValues(alpha:0.4),
                 size: 18,
               ),
               border: OutlineInputBorder(
@@ -437,7 +581,7 @@ static const List<LinearGradient> _themes = [
             child: Container(
               padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.08),
+                color: Colors.white.withValues(alpha:0.08),
                 borderRadius: BorderRadius.circular(22),
               ),
               child: Text(emoji, style: const TextStyle(fontSize: 22)),
@@ -451,236 +595,293 @@ static const List<LinearGradient> _themes = [
   @override
   Widget build(BuildContext context) {
     // Top-level selects for Layout
-    final themeIndex = ref.watch(partyStateProvider.select((s) => s.themeIndex));
-    final isDisconnected = ref.watch(partyStateProvider.select((s) => s.isDisconnected));
+    final themeIndex = ref.watch(
+      partyStateProvider.select((s) => s.themeIndex),
+    );
+    final isDisconnected = ref.watch(
+      partyStateProvider.select((s) => s.isDisconnected),
+    );
     final partySize = ref.watch(partyStateProvider.select((s) => s.partySize));
     final isHost = ref.watch(partyProvider.select((s) => s.isHost));
-    
-    // Unread messages logic
-    ref.listen(partyStateProvider.select((s) => s.messages.length), (prev, next) {
-        if (_tabController.index != 1) {
-           final diff = next - (prev ?? 0);
-           if (diff > 0) {
-              setState(() {
-                 _unreadMessages += diff;
-              });
-           }
+
+    // Unread messages logic (Chat is now index 2)
+    ref.listen(partyStateProvider.select((s) => s.messages.length), (
+      prev,
+      next,
+    ) {
+      if (_tabController.index != 2) {
+        final diff = next - (prev ?? 0);
+        if (diff > 0) {
+          setState(() {
+            _unreadMessages += diff;
+          });
         }
+      }
     });
 
     // Force exit if global party state clears (e.g. Party Ended)
     ref.listen(partyProvider, (prev, next) {
       if (prev?.partyId != null && next.partyId == null) {
         if (mounted) {
-           Navigator.popUntil(context, (route) => route.isFirst);
+          setState(() => _canPop = true);
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+             if (mounted) Navigator.popUntil(context, (route) => route.isFirst);
+          });
         }
       }
     });
 
     final bool isKeyboardOpen = MediaQuery.of(context).viewInsets.bottom > 0;
 
-    return Scaffold(
-      body: FloatingEmojis(
-        reactionStream: _reactionStreamCtrl.stream,
-        child: Container(
+    return PopScope(
+      canPop: _canPop,
+      onPopInvokedWithResult: (didPop, result) async {
+        if (didPop) return;
+        final shouldLeave = await showExitConfirmationDialog(context, isHost);
+        if (shouldLeave == true) {
+          if (mounted) {
+            setState(() => _canPop = true);
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted) Navigator.of(context).pop();
+            });
+          }
+        }
+      },
+      child: Scaffold(
+        body: FloatingEmojis(
+          reactionStream: _reactionStreamCtrl.stream,
+          child: Container(
           decoration: BoxDecoration(gradient: _themes[themeIndex]),
           child: SafeArea(
             child: Column(
               children: [
-                 // ---- HEADER ----
-                 Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        // Party Code & Connection
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            if (isDisconnected)
-                              Padding(
-                                padding: const EdgeInsets.only(bottom: 4),
-                                child: Row(
-                                  children: [
-                                    const SizedBox(
-                                      width: 8, 
-                                      height: 8, 
-                                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.redAccent),
-                                    ),
-                                    const SizedBox(width: 6),
-                                    Text("Reconnecting...", style: TextStyle(color: Colors.redAccent, fontSize: 10, fontWeight: FontWeight.bold)),
-                                  ],
-                                ),
-                              ),
-                            GestureDetector(
-                              onTap: _copyCode,
+                // ---- HEADER ----
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 20,
+                    vertical: 16,
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      // Party Code & Connection
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          if (isDisconnected)
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: 4),
                               child: Row(
                                 children: [
-                                  Text(
-                                    widget.party["id"],
-                                    style: const TextStyle(
-                                      fontSize: 24,
-                                      fontWeight: FontWeight.w800,
-                                      letterSpacing: 1.5,
-                                      color: Colors.white,
+                                  const SizedBox(
+                                    width: 8,
+                                    height: 8,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: Colors.redAccent,
                                     ),
                                   ),
-                                  const SizedBox(width: 8),
-                                  Icon(Icons.copy_rounded, size: 14, color: Colors.white.withOpacity(0.5)),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    "Reconnecting...",
+                                    style: TextStyle(
+                                      color: Colors.redAccent,
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
                                 ],
                               ),
                             ),
-                            GestureDetector(
-                              onTap: _showMembersList,
-                              child: Padding(
-                                padding: const EdgeInsets.only(top: 4),
-                                child: Row(
-                                  children: [
-                                    Icon(Icons.people_alt_rounded, size: 12, color: Theme.of(context).primaryColor),
-                                    const SizedBox(width: 4),
-                                    Text(
-                                      "$partySize active",
-                                      style: TextStyle(
-                                        color: Theme.of(context).primaryColor,
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.w600,
-                                      ),
+                          GestureDetector(
+                            onTap: _copyCode,
+                            child: Row(
+                              children: [
+                                Text(
+                                  widget.party["id"],
+                                  style: const TextStyle(
+                                    fontSize: 24,
+                                    fontWeight: FontWeight.w800,
+                                    letterSpacing: 1.5,
+                                    color: Colors.white,
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                Icon(
+                                  Icons.copy_rounded,
+                                  size: 14,
+                                  color: Colors.white.withValues(alpha:0.5),
+                                ),
+                              ],
+                            ),
+                          ),
+                          GestureDetector(
+                            onTap: _showMembersList,
+                            child: Padding(
+                              padding: const EdgeInsets.only(top: 4),
+                              child: Row(
+                                children: [
+                                  Icon(
+                                    Icons.people_alt_rounded,
+                                    size: 12,
+                                    color: Theme.of(context).primaryColor,
+                                  ),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    "$partySize active",
+                                    style: TextStyle(
+                                      color: Theme.of(context).primaryColor,
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600,
                                     ),
-                                  ],
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+
+                      // Actions
+                      Row(
+                        children: [
+                          _HeaderIconButton(
+                            icon: Icons.share_rounded,
+                            onTap: _shareParty,
+                          ),
+                          const SizedBox(width: 8),
+                          if (isHost) ...[
+                            _HeaderIconButton(
+                              icon: Icons.palette_rounded,
+                              onTap: _changeTheme,
+                            ),
+                            const SizedBox(width: 8),
+                            _HeaderIconButton(
+                              icon: Icons.qr_code_rounded,
+                              onTap: _showQRCode,
+                            ),
+                            const SizedBox(width: 8),
+                          ],
+                          _RoleChip(isHost: isHost),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+
+                // ---- PLAYER & CONTROLS ----
+                AnimatedSize(
+                  duration: const Duration(milliseconds: 250),
+                  curve: Curves.easeOutCubic,
+                  child: SizedBox(
+                    height: isKeyboardOpen ? 0 : null,
+                    child: Column(
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 16),
+                          child: PartyPlayer(partyId: widget.party['id']),
+                        ),
+                        const SizedBox(height: 10),
+                        _buildReactions(),
+                        const SizedBox(height: 10),
+                        PartyControls(
+                          partyId: widget.party['id'],
+                          onLeave: _leaveParty,
+                        ),
+                        const SizedBox(height: 12),
+                      ],
+                    ),
+                  ),
+                ),
+
+                // ---- TABS ----
+                TabBar(
+                  controller: _tabController,
+                  indicatorSize: TabBarIndicatorSize.label,
+                  indicatorColor: Theme.of(context).primaryColor,
+                  labelColor: Colors.white,
+                  unselectedLabelColor: Colors.white.withValues(alpha:0.45),
+                  indicatorWeight: 3,
+                  dividerColor: Colors.transparent,
+                  labelStyle: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 13,
+                    letterSpacing: 0.5,
+                  ),
+                  tabs: [
+                    const Tab(text: "QUEUE"),
+                    const Tab(text: "LYRICS"),
+                    Tab(
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const Text("CHAT"),
+                          if (_unreadMessages > 0) ...[
+                            const SizedBox(width: 6),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 6,
+                                vertical: 2,
+                              ),
+                              decoration: BoxDecoration(
+                                color: Theme.of(context).primaryColor,
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: Text(
+                                _unreadMessages > 9 ? "9+" : "$_unreadMessages",
+                                style: const TextStyle(
+                                  fontSize: 10,
+                                  color: Colors.black,
+                                  fontWeight: FontWeight.bold,
                                 ),
                               ),
                             ),
                           ],
-                        ),
-
-                        // Actions
-                        Row(
-                          children: [
-                            _HeaderIconButton(icon: Icons.share_rounded, onTap: _shareParty),
-                            const SizedBox(width: 8),
-                            if (isHost) ...[
-                              _HeaderIconButton(icon: Icons.palette_rounded, onTap: _changeTheme),
-                              const SizedBox(width: 8),
-                              _HeaderIconButton(icon: Icons.qr_code_rounded, onTap: _showQRCode),
-                              const SizedBox(width: 8),
-                            ],
-                            _RoleChip(isHost: isHost),
-                          ],
-                        ),
-                      ],
-                    ),
-                 ),
-
-                 // ---- PLAYER & CONTROLS ----
-                 AnimatedSize(
-                    duration: const Duration(milliseconds: 250),
-                    curve: Curves.easeOutCubic,
-                    child: SizedBox(
-                      height: isKeyboardOpen ? 0 : null,
-                      child: Column(
-                        children: [
-                           Padding(
-                             padding: const EdgeInsets.symmetric(horizontal: 16),
-                             child: PartyPlayer(partyId: widget.party['id']),
-                           ),
-                           const SizedBox(height: 10),
-                           _buildReactions(),
-                           const SizedBox(height: 10),
-                           PartyControls(partyId: widget.party['id'], onLeave: _leaveParty),
-                           const SizedBox(height: 12),
                         ],
                       ),
                     ),
-                 ),
+                  ],
+                ),
 
-                 // ---- TABS ----
-                 TabBar(
+                const SizedBox(height: 6),
+
+                // ---- TAB CONTENT ----
+                Expanded(
+                  child: TabBarView(
                     controller: _tabController,
-                    indicatorSize: TabBarIndicatorSize.label,
-                    indicatorColor: Theme.of(context).primaryColor,
-                    labelColor: Colors.white,
-                    unselectedLabelColor: Colors.white.withOpacity(0.45),
-                    indicatorWeight: 3,
-                    dividerColor: Colors.transparent,
-                    labelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, letterSpacing: 0.5),
-                    tabs: [
-                      const Tab(text: "QUEUE"),
-                      Tab(
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      // 1. QUEUE
+                      _KeepAliveWrapper(
+                        child: Column(
                           children: [
-                            const Text("CHAT"),
-                            if (_unreadMessages > 0) ...[
-                              const SizedBox(width: 6),
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                decoration: BoxDecoration(
-                                  color: Theme.of(context).primaryColor,
-                                  borderRadius: BorderRadius.circular(10),
-                                ),
-                                child: Text(
-                                  _unreadMessages > 9 ? "9+" : "$_unreadMessages",
-                                  style: const TextStyle(fontSize: 10, color: Colors.black, fontWeight: FontWeight.bold),
-                                ),
-                              ),
-                            ],
+                            Expanded(
+                              child: PartyQueue(partyId: widget.party['id']),
+                            ),
+                            _buildSearchBar(),
                           ],
+                        ),
+                      ),
+                      
+                      // 2. LYRICS
+                      const _KeepAliveWrapper(
+                        child: PartyLyrics(),
+                      ),
+
+                      // 3. CHAT
+                      _KeepAliveWrapper(
+                        child: PartyChat(
+                          partyId: widget.party['id'],
+                          username: widget.username,
                         ),
                       ),
                     ],
                   ),
-
-                 const SizedBox(height: 6),
-
-                 // ---- TAB CONTENT ----
-                 Expanded(
-                    child: TabBarView(
-                      controller: _tabController,
-                      children: [
-                         const _KeepAliveWrapper(
-                           child: Column(
-                             children: [
-                               Expanded(child: PartyQueue(partyId: "")), // Pass dummy or fix constructor usage?
-                               // Wait, PartyQueue needs partyId. 
-                               // Actually, I can just use the widget.party['id'] from state.
-                               // Let's check how it was called before.
-                             ],
-                           ),
-                         ),
-                         // ...
-                      ],
-                    ),
-                 ),
-                 
-      // Wait, let's look at the existing code to see how it's called.
-      // Existing:
-      // Expanded(child: PartyQueue(partyId: widget.party['id'])),
-      // _buildSearchBar(),
-      
-      // So:
-                 // ---- TAB CONTENT ----
-                 Expanded(
-                    child: TabBarView(
-                      controller: _tabController,
-                      children: [
-                         _KeepAliveWrapper(
-                           child: Column(
-                             children: [
-                               Expanded(child: PartyQueue(partyId: widget.party['id'])),
-                               _buildSearchBar(),
-                             ],
-                           ),
-                         ),
-                         _KeepAliveWrapper(
-                           child: PartyChat(partyId: widget.party['id'], username: widget.username),
-                         ),
-                      ],
-                    ),
-                 ),
+                ),
               ],
             ),
           ),
         ),
+      ),
       ),
     );
   }
@@ -694,7 +895,8 @@ class _KeepAliveWrapper extends StatefulWidget {
   State<_KeepAliveWrapper> createState() => _KeepAliveWrapperState();
 }
 
-class _KeepAliveWrapperState extends State<_KeepAliveWrapper> with AutomaticKeepAliveClientMixin {
+class _KeepAliveWrapperState extends State<_KeepAliveWrapper>
+    with AutomaticKeepAliveClientMixin {
   @override
   Widget build(BuildContext context) {
     super.build(context);
@@ -719,7 +921,7 @@ class _HeaderIconButton extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.all(10),
         decoration: BoxDecoration(
-          color: Colors.white.withOpacity(0.08),
+          color: Colors.white.withValues(alpha:0.08),
           borderRadius: BorderRadius.circular(12),
         ),
         child: Icon(icon, size: 20, color: Colors.white),

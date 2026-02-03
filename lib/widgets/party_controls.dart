@@ -149,7 +149,7 @@ class _GuestControls extends ConsumerWidget {
             child: Container(
               padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
               decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.05),
+                color: Colors.white.withValues(alpha:0.05),
                 borderRadius: BorderRadius.circular(16),
               ),
               child: Column(
@@ -168,7 +168,7 @@ class _GuestControls extends ConsumerWidget {
                       ),
                       Text(
                         canVote ? "$votes/$required" : "5+ users needed",
-                        style: TextStyle(fontSize: 10, color: Colors.white.withOpacity(0.5)),
+                        style: TextStyle(fontSize: 10, color: Colors.white.withValues(alpha:0.5)),
                       ),
                     ],
                   ),
@@ -227,7 +227,7 @@ class _ControlButton extends StatelessWidget {
     final theme = Theme.of(context);
     final bool isDisabled = onTap == null;
 
-    Color bgColor = Colors.white.withOpacity(0.08);
+    Color bgColor = Colors.white.withValues(alpha:0.08);
     Color iconColor = Colors.white;
 
     if (isPrimary) {
@@ -237,7 +237,7 @@ class _ControlButton extends StatelessWidget {
       bgColor = const Color(0xFF2C0404); // Deep Red
       iconColor = const Color(0xFFFF2E63); // Hot Pink
     } else if (isDisabled) {
-      bgColor = Colors.white.withOpacity(0.02);
+      bgColor = Colors.white.withValues(alpha:0.02);
       iconColor = Colors.white24;
     }
 
@@ -250,11 +250,11 @@ class _ControlButton extends StatelessWidget {
         decoration: BoxDecoration(
           color: bgColor,
           borderRadius: BorderRadius.circular(16),
-          border: isDestructive ? Border.all(color: iconColor.withOpacity(0.3)) : null,
+          border: isDestructive ? Border.all(color: iconColor.withValues(alpha:0.3)) : null,
           boxShadow: isPrimary
               ? [
                   BoxShadow(
-                    color: theme.primaryColor.withOpacity(0.4),
+                    color: theme.primaryColor.withValues(alpha:0.4),
                     blurRadius: 12,
                     offset: const Offset(0, 4),
                   )

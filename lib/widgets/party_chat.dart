@@ -50,7 +50,7 @@ class _PartyChatState extends ConsumerState<PartyChat> {
                   child: Text(
                     "Welcome to chat — say hi 👋",
                     style: TextStyle(
-                      color: Colors.white.withOpacity(0.35),
+                      color: Colors.white.withValues(alpha:0.35),
                       fontSize: 12,
                       letterSpacing: 0.3,
                     ),
@@ -74,13 +74,13 @@ class _PartyChatState extends ConsumerState<PartyChat> {
                               vertical: 4,
                             ),
                             decoration: BoxDecoration(
-                              color: Colors.white.withOpacity(0.05),
+                              color: Colors.white.withValues(alpha:0.05),
                               borderRadius: BorderRadius.circular(12),
                             ),
                             child: Text(
                               msg['text'] ?? "",
                               style: TextStyle(
-                                color: Colors.white.withOpacity(0.45),
+                                color: Colors.white.withValues(alpha:0.45),
                                 fontSize: 11,
                                 fontStyle: FontStyle.italic,
                                 letterSpacing: 0.3,
@@ -105,8 +105,8 @@ class _PartyChatState extends ConsumerState<PartyChat> {
                         ),
                         decoration: BoxDecoration(
                           color: isMe
-                              ? theme.primaryColor.withOpacity(0.9)
-                              : Colors.white.withOpacity(0.08),
+                              ? theme.primaryColor.withValues(alpha:0.9)
+                              : Colors.white.withValues(alpha:0.08),
                           borderRadius: BorderRadius.only(
                             topLeft: const Radius.circular(18),
                             topRight: const Radius.circular(18),
@@ -154,7 +154,7 @@ class _PartyChatState extends ConsumerState<PartyChat> {
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           decoration: BoxDecoration(
-            color: Colors.black.withOpacity(0.3),
+            color: Colors.black.withValues(alpha:0.3),
             borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
           ),
           child: Row(
@@ -166,11 +166,11 @@ class _PartyChatState extends ConsumerState<PartyChat> {
                   decoration: InputDecoration(
                     hintText: "Type a message...",
                     hintStyle: TextStyle(
-                      color: Colors.white.withOpacity(0.4),
+                      color: Colors.white.withValues(alpha:0.4),
                       fontSize: 14,
                     ),
                     filled: true,
-                    fillColor: Colors.white.withOpacity(0.08),
+                    fillColor: Colors.white.withValues(alpha:0.08),
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(24),
                       borderSide: BorderSide.none,
@@ -190,7 +190,7 @@ class _PartyChatState extends ConsumerState<PartyChat> {
                   shape: BoxShape.circle,
                   boxShadow: [
                     BoxShadow(
-                      color: theme.primaryColor.withOpacity(0.3),
+                      color: theme.primaryColor.withValues(alpha:0.3),
                       blurRadius: 12,
                       offset: const Offset(0, 4),
                     ),

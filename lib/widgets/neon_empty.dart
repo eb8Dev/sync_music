@@ -18,7 +18,7 @@ class NeonEmptyState extends StatelessWidget {
               shape: BoxShape.circle,
               boxShadow: [
                 BoxShadow(
-                  color: Theme.of(context).colorScheme.primary.withOpacity(0.4),
+                  color: Theme.of(context).colorScheme.primary.withValues(alpha:0.4),
                   blurRadius: 24,
                   spreadRadius: 2,
                 ),
@@ -27,7 +27,7 @@ class NeonEmptyState extends StatelessWidget {
             child: Icon(
               Icons.graphic_eq_rounded,
               size: 42,
-              color: Theme.of(context).colorScheme.primary.withOpacity(0.85),
+              color: Theme.of(context).colorScheme.primary.withValues(alpha:0.85),
             ),
           ),
           const SizedBox(height: 14),
@@ -45,7 +45,7 @@ class NeonEmptyState extends StatelessWidget {
             "Your party is waiting for a beat",
             style: TextStyle(
               fontSize: 13,
-              color: Colors.white.withOpacity(0.5),
+              color: Colors.white.withValues(alpha:0.5),
             ),
           ),
         ],

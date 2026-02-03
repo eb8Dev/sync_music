@@ -15,7 +15,7 @@ class NeonLoader extends StatelessWidget {
             scale: value,
             child: CircularProgressIndicator(
               strokeWidth: 2.5,
-              color: Theme.of(context).colorScheme.primary.withOpacity(0.9),
+              color: Theme.of(context).colorScheme.primary.withValues(alpha:0.9),
             ),
           );
         },
