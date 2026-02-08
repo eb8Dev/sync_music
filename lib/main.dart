@@ -1,5 +1,4 @@
 import 'dart:ui';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -44,11 +43,7 @@ void main() async {
 
   final prefs = await SharedPreferences.getInstance();
   final bool onboardingSeen = prefs.getBool('onboarding_seen') ?? false;
-  runApp(
-    ProviderScope(
-      child: PartyApp(showOnboarding: !onboardingSeen),
-    ),
-  );
+  runApp(ProviderScope(child: PartyApp(showOnboarding: !onboardingSeen)));
 }
 
 // ---------------- APP ROOT ----------------
@@ -60,7 +55,10 @@ class PartyApp extends ConsumerStatefulWidget {
   ConsumerState<PartyApp> createState() => _PartyAppState();
 }
 
-class _PartyAppState extends ConsumerState<PartyApp> with WidgetsBindingObserver {
+class _PartyAppState extends ConsumerState<PartyApp>
+    with WidgetsBindingObserver {
+  final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
+
   @override
   void initState() {
     super.initState();
@@ -97,10 +95,14 @@ class _PartyAppState extends ConsumerState<PartyApp> with WidgetsBindingObserver
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      navigatorKey: navigatorKey,
+
       debugShowCheckedModeBanner: false,
       title: 'Sync Music',
       theme: AppTheme.darkTheme,
-      home: widget.showOnboarding ? const OnboardingScreen() : const HomeScreen(),
+      home: widget.showOnboarding
+          ? const OnboardingScreen()
+          : const HomeScreen(),
     );
   }
 }

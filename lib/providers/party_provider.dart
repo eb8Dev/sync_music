@@ -14,6 +14,9 @@ class PartyState {
   final Map<String, dynamic>? partyData;
   final String? error;
   final String? lastPartyId;
+  final bool isPartyEnded;
+  final String? endMessage;
+  final bool isKicked;
 
   const PartyState({
     this.connecting = false,
@@ -22,6 +25,9 @@ class PartyState {
     this.partyData,
     this.error,
     this.lastPartyId,
+    this.isPartyEnded = false,
+    this.endMessage,
+    this.isKicked = false,
   });
 
   PartyState copyWith({
@@ -32,6 +38,9 @@ class PartyState {
     String? error,
     String? lastPartyId,
     bool clearLastPartyId = false,
+    bool? isPartyEnded,
+    String? endMessage,
+    bool? isKicked,
   }) {
     return PartyState(
       connecting: connecting ?? this.connecting,
@@ -40,6 +49,9 @@ class PartyState {
       partyData: partyData ?? this.partyData,
       error: error,
       lastPartyId: clearLastPartyId ? null : (lastPartyId ?? this.lastPartyId),
+      isPartyEnded: isPartyEnded ?? this.isPartyEnded,
+      endMessage: endMessage ?? this.endMessage,
+      isKicked: isKicked ?? this.isKicked,
     );
   }
 }
@@ -68,7 +80,7 @@ class PartyNotifier extends Notifier<PartyState> {
     if (!_socket.hasListeners("connect")) {
       _socket.on("connect", (_) {
         debugPrint("Socket Connected!");
-        if (state.partyId != null) {
+        if (state.partyId != null && !state.isPartyEnded) {
            debugPrint("Auto-reconnecting to active party: ${state.partyId}");
            final userState = ref.read(userProvider);
            if (state.isHost) {
@@ -101,6 +113,23 @@ class PartyNotifier extends Notifier<PartyState> {
         debugPrint("Socket Disconnected");
       });
     }
+
+    _socket.on("KICKED", (_) async {
+      debugPrint("KICKED event received");
+      
+      // Record kick logic locally
+      if (state.partyId != null) {
+        final prefs = await SharedPreferences.getInstance();
+        final kickKey = "kicks_${state.partyId}";
+        final kicks = prefs.getStringList(kickKey) ?? [];
+        kicks.add(DateTime.now().toIso8601String());
+        await prefs.setStringList(kickKey, kicks);
+        debugPrint("Kick recorded. Total kicks for ${state.partyId}: ${kicks.length}");
+      }
+
+      clearSession();
+      state = state.copyWith(isKicked: true);
+    });
     
     if (!_socket.hasListeners("PARTY_STATE")) {
        _socket.on("PARTY_STATE", (data) {
@@ -122,6 +151,7 @@ class PartyNotifier extends Notifier<PartyState> {
           isHost: hostStatus,
           partyData: Map<String, dynamic>.from(data),
           error: null,
+          isPartyEnded: false,
         );
       });
     }
@@ -149,10 +179,15 @@ class PartyNotifier extends Notifier<PartyState> {
       });
     }
 
-    _socket.on("PARTY_ENDED", (_) {
-      debugPrint("Party Ended Event Received in Provider");
+    _socket.on("PARTY_ENDED", (data) {
+      debugPrint("Party Ended Event Received in Provider: $data");
       clearSession();
-      state = const PartyState(); // Reset state
+      // Do not reset everything, just mark as ended so UI can show the screen
+      String? msg;
+      if (data is Map && data.containsKey('message')) {
+        msg = data['message'];
+      }
+      state = state.copyWith(isPartyEnded: true, endMessage: msg);
     });
   }
 
@@ -195,14 +230,11 @@ class PartyNotifier extends Notifier<PartyState> {
   }
   
   void clearError() {
-    state = PartyState(
-      connecting: state.connecting,
-      partyId: state.partyId,
-      isHost: state.isHost,
-      partyData: state.partyData,
-      error: null,
-      lastPartyId: state.lastPartyId,
-    );
+    state = state.copyWith(error: null);
+  }
+
+  void resetState() {
+    state = const PartyState();
   }
 
   void createParty({

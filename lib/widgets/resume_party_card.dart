@@ -1,5 +1,6 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
+import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 
 class ResumePartyCard extends StatefulWidget {
   final String partyId;
@@ -88,7 +89,7 @@ class _ResumePartyCardState extends State<ResumePartyCard> with SingleTickerProv
                         // Animated Icon
                         _PulsingIcon(
                           controller: _pulseController,
-                          icon: Icons.history_rounded,
+                          icon: FontAwesomeIcons.clockRotateLeft,
                           color: accentColor,
                         ),
                         const SizedBox(width: 16),
@@ -124,7 +125,7 @@ class _ResumePartyCardState extends State<ResumePartyCard> with SingleTickerProv
                             backgroundColor: Colors.white.withValues(alpha: 0.05),
                             hoverColor: Colors.white.withValues(alpha: 0.1),
                           ),
-                          icon: const Icon(Icons.close, size: 18, color: Colors.white70),
+                          icon: const Icon(FontAwesomeIcons.xmark, size: 16, color: Colors.white70),
                           onPressed: _disabled ? null : widget.onDismiss,
                         ),
                       ],
@@ -136,7 +137,7 @@ class _ResumePartyCardState extends State<ResumePartyCard> with SingleTickerProv
                           Expanded(
                             child: _BouncyButton(
                               label: "HOST",
-                              icon: Icons.admin_panel_settings_outlined,
+                              icon: FontAwesomeIcons.userShield,
                               onTap: () => _run(widget.onHostRejoin),
                               isPrimary: true,
                               color: accentColor,
@@ -147,7 +148,7 @@ class _ResumePartyCardState extends State<ResumePartyCard> with SingleTickerProv
                         Expanded(
                           child: _BouncyButton(
                             label: "JOIN",
-                            icon: Icons.login_rounded,
+                            icon: FontAwesomeIcons.rightToBracket,
                             onTap: () => _run(widget.onGuestRejoin),
                             isPrimary: !widget.isHost,
                             color: accentColor,

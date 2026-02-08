@@ -1,11 +1,13 @@
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:sync_music/services/support_service.dart';
 import 'package:sync_music/support_screen.dart';
 import 'package:sync_music/widgets/glass_card.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:sync_music/playlists_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -156,7 +158,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               const SizedBox(height: 8),
               
               _SettingsTile(
-                icon: Icons.support_agent,
+                icon: FontAwesomeIcons.headset,
                 title: "Contact Support",
                 subtitle: "Report bugs or request features",
                 onTap: () {
@@ -170,10 +172,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
               const SizedBox(height: 16),
 
               _SettingsTile(
-                icon: Icons.star_rate_rounded,
+                icon: FontAwesomeIcons.solidStar,
                 title: "Rate Us",
                 subtitle: "Love the app? Let us know!",
                 onTap: _handleRateUs,
+              ),
+
+              const SizedBox(height: 16),
+
+              _SettingsTile(
+                icon: FontAwesomeIcons.compactDisc,
+                title: "My Playlists",
+                subtitle: "Manage your local playlists",
+                onTap: () {
+                   Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const PlaylistsScreen()),
+                  );
+                },
               ),
 
               const SizedBox(height: 32),
@@ -190,7 +206,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               const SizedBox(height: 8),
 
               _SettingsTile(
-                icon: Icons.description_outlined,
+                icon: FontAwesomeIcons.fileLines,
                 title: "Terms of Service",
                 subtitle: "Read our terms",
                 onTap: () => _launchLegalUrl(
@@ -201,7 +217,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               const SizedBox(height: 8),
 
               _SettingsTile(
-                icon: Icons.privacy_tip_outlined,
+                icon: FontAwesomeIcons.shield,
                 title: "Privacy Policy",
                 subtitle: "How we use your data",
                 onTap: () => _launchLegalUrl(
@@ -296,9 +312,9 @@ class _SettingsTile extends StatelessWidget {
                 ),
               ),
               Icon(
-                Icons.arrow_forward_ios_rounded,
+                FontAwesomeIcons.chevronRight,
                 color: Colors.white.withValues(alpha:0.2),
-                size: 16,
+                size: 14,
               ),
             ],
           ),

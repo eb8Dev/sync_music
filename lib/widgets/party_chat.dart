@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:sync_music/providers/party_state_provider.dart';
 import 'package:sync_music/providers/socket_provider.dart';
 
@@ -93,56 +94,58 @@ class _PartyChatState extends ConsumerState<PartyChat> {
 
                     final isMe = msg['senderId'] == socket.id;
 
-                    return Align(
-                      alignment: isMe
-                          ? Alignment.centerRight
-                          : Alignment.centerLeft,
-                      child: Container(
-                        margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 10,
-                        ),
-                        decoration: BoxDecoration(
-                          color: isMe
-                              ? theme.primaryColor.withValues(alpha:0.9)
-                              : Colors.white.withValues(alpha:0.08),
-                          borderRadius: BorderRadius.only(
-                            topLeft: const Radius.circular(18),
-                            topRight: const Radius.circular(18),
-                            bottomLeft: Radius.circular(isMe ? 18 : 4),
-                            bottomRight: Radius.circular(isMe ? 4 : 18),
+                    return RepaintBoundary(
+                      child: Align(
+                        alignment: isMe
+                            ? Alignment.centerRight
+                            : Alignment.centerLeft,
+                        child: Container(
+                          margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 10,
                           ),
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            // Username (only for others)
-                            if (!isMe)
-                              Padding(
-                                padding: const EdgeInsets.only(bottom: 4),
-                                child: Text(
-                                  msg['username'] ?? "Guest",
-                                  style: TextStyle(
-                                    color: theme.primaryColor,
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w700,
-                                    letterSpacing: 0.3,
+                          decoration: BoxDecoration(
+                            color: isMe
+                                ? theme.primaryColor.withValues(alpha:0.9)
+                                : Colors.white.withValues(alpha:0.08),
+                            borderRadius: BorderRadius.only(
+                              topLeft: const Radius.circular(18),
+                              topRight: const Radius.circular(18),
+                              bottomLeft: Radius.circular(isMe ? 18 : 4),
+                              bottomRight: Radius.circular(isMe ? 4 : 18),
+                            ),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              // Username (only for others)
+                              if (!isMe)
+                                Padding(
+                                  padding: const EdgeInsets.only(bottom: 4),
+                                  child: Text(
+                                    msg['username'] ?? "Guest",
+                                    style: TextStyle(
+                                      color: theme.primaryColor,
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w700,
+                                      letterSpacing: 0.3,
+                                    ),
                                   ),
                                 ),
+  
+                              // Message text
+                              Text(
+                                msg['text'] ?? "",
+                                style: TextStyle(
+                                  color: isMe ? Colors.black : Colors.white,
+                                  fontSize: 14,
+                                  height: 1.3,
+                                  fontWeight: isMe ? FontWeight.w500 : FontWeight.normal,
+                                ),
                               ),
-
-                            // Message text
-                            Text(
-                              msg['text'] ?? "",
-                              style: TextStyle(
-                                color: isMe ? Colors.black : Colors.white,
-                                fontSize: 14,
-                                height: 1.3,
-                                fontWeight: isMe ? FontWeight.w500 : FontWeight.normal,
-                              ),
-                            ),
-                          ],
+                            ],
+                          ),
                         ),
                       ),
                     );
@@ -197,7 +200,7 @@ class _PartyChatState extends ConsumerState<PartyChat> {
                   ],
                 ),
                 child: IconButton(
-                  icon: const Icon(Icons.send_rounded, size: 20),
+                  icon: const Icon(FontAwesomeIcons.paperPlane, size: 18),
                   color: Colors.white,
                   onPressed: _sendMessage,
                 ),

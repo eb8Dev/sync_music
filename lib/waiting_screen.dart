@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:sync_music/party_screen.dart';
 import 'package:sync_music/movie_party_screen.dart';
 import 'package:sync_music/providers/party_provider.dart';
@@ -15,6 +16,7 @@ import 'package:qr_flutter/qr_flutter.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:youtube_player_flutter/youtube_player_flutter.dart';
+import 'package:sync_music/widgets/custom_snackbar.dart';
 
 class WaitingScreen extends ConsumerStatefulWidget {
   final Map<String, dynamic> party;
@@ -25,6 +27,7 @@ class WaitingScreen extends ConsumerStatefulWidget {
   @override
   ConsumerState<WaitingScreen> createState() => _WaitingScreenState();
 }
+
 
 class _WaitingScreenState extends ConsumerState<WaitingScreen> {
   final YouTubeService _ytService = YouTubeService();
@@ -175,13 +178,10 @@ class _WaitingScreenState extends ConsumerState<WaitingScreen> {
     if (!mounted) return;
 
     if (!isPlayable) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            "Cannot add this video (Age Restricted or Unavailable).",
-          ),
-          backgroundColor: Colors.red,
-        ),
+      CustomSnackbar.show(
+        context,
+        "Cannot add this video (Age Restricted or Unavailable).",
+        isError: true,
       );
       return;
     }
@@ -193,11 +193,10 @@ class _WaitingScreenState extends ConsumerState<WaitingScreen> {
       return trackId == video.id.value;
     });
     if (isDuplicate) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("This video is already in the queue!"),
-          backgroundColor: Colors.orange,
-        ),
+      CustomSnackbar.show(
+        context,
+        "This video is already in the queue!",
+        isError: true,
       );
       return;
     }
@@ -220,9 +219,7 @@ class _WaitingScreenState extends ConsumerState<WaitingScreen> {
 
   void _copyCode() {
     Clipboard.setData(ClipboardData(text: widget.party["id"]));
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(const SnackBar(content: Text("Party Code Copied!")));
+    CustomSnackbar.show(context, "Party Code Copied!");
   }
 
   @override
@@ -307,7 +304,7 @@ class _WaitingScreenState extends ConsumerState<WaitingScreen> {
                                   ),
                                 ),
                                 const SizedBox(width: 8),
-                                Icon(Icons.copy_rounded, size: 16, color: Theme.of(context).primaryColor),
+                                Icon(FontAwesomeIcons.copy, size: 14, color: Theme.of(context).primaryColor),
                               ],
                             ),
                           ),
@@ -316,12 +313,12 @@ class _WaitingScreenState extends ConsumerState<WaitingScreen> {
                       Row(
                         children: [
                           _HeaderActionButton(
-                            icon: Icons.qr_code_rounded,
+                            icon: FontAwesomeIcons.qrcode,
                             onTap: _showQRCode,
                           ),
                           const SizedBox(width: 12),
                           _HeaderActionButton(
-                            icon: Icons.share_rounded,
+                            icon: FontAwesomeIcons.shareFromSquare,
                             onTap: _shareParty,
                             isPrimary: true,
                           ),
@@ -354,8 +351,8 @@ class _WaitingScreenState extends ConsumerState<WaitingScreen> {
                                   ],
                                 ),
                                 child: Icon(
-                                  isMovieMode ? Icons.movie_filter_rounded : (isHost ? Icons.headphones_rounded : Icons.headset_mic_rounded),
-                                  size: 64,
+                                  isMovieMode ? FontAwesomeIcons.clapperboard : (isHost ? FontAwesomeIcons.headphones : FontAwesomeIcons.headset),
+                                  size: 48,
                                   color: Theme.of(context).primaryColor,
                                 ),
                               ),
@@ -470,7 +467,10 @@ class _WaitingScreenState extends ConsumerState<WaitingScreen> {
                         decoration: InputDecoration(
                           hintText: isMovieMode ? "Add a movie to queue..." : "Add a song to queue...",
                           hintStyle: TextStyle(color: Colors.white.withValues(alpha:0.4)),
-                          prefixIcon: Icon(Icons.search_rounded, color: Colors.white.withValues(alpha:0.4)),
+                          prefixIcon: Padding(
+                            padding: const EdgeInsets.all(12.0),
+                            child: Icon(FontAwesomeIcons.magnifyingGlass, color: Colors.white.withValues(alpha:0.4), size: 14),
+                          ),
                           suffixIcon: isSearching
                               ? Padding(
                                   padding: const EdgeInsets.all(12),

@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:sync_music/providers/party_provider.dart';
 import 'package:sync_music/providers/party_state_provider.dart';
 import 'package:sync_music/providers/socket_provider.dart';
@@ -10,6 +11,12 @@ import 'package:sync_music/widgets/party_chat.dart';
 import 'package:sync_music/widgets/party_player.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 import 'package:sync_music/widgets/exit_confirmation_dialog.dart';
+import 'package:sync_music/services/remote_config_service.dart';
+import 'package:sync_music/widgets/generate_party_image.dart';
+import 'package:share_plus/share_plus.dart';
+import 'package:sync_music/services/youtube_service.dart';
+import 'package:youtube_explode_dart/youtube_explode_dart.dart' as yt;
+import 'package:sync_music/party_ended_screen.dart';
 
 class MoviePartyScreen extends ConsumerStatefulWidget {
   final Map<String, dynamic> party;
@@ -26,12 +33,13 @@ class MoviePartyScreen extends ConsumerStatefulWidget {
 }
 
 class _MoviePartyScreenState extends ConsumerState<MoviePartyScreen> {
+  final YouTubeService _ytService = YouTubeService();
   bool _showControls = true;
   Timer? _controlsTimer;
   bool _showChat = false;
   int _unreadMessages = 0;
   bool _canPop = false;
-  
+
   final StreamController<String> _reactionStreamCtrl =
       StreamController<String>.broadcast();
 
@@ -58,9 +66,7 @@ class _MoviePartyScreenState extends ConsumerState<MoviePartyScreen> {
   @override
   void dispose() {
     // Revert to Portrait
-    SystemChrome.setPreferredOrientations([
-      DeviceOrientation.portraitUp,
-    ]);
+    SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
     SystemChrome.setEnabledSystemUIMode(
       SystemUiMode.manual,
       overlays: SystemUiOverlay.values,
@@ -74,7 +80,50 @@ class _MoviePartyScreenState extends ConsumerState<MoviePartyScreen> {
 
     _reactionStreamCtrl.close();
     _controlsTimer?.cancel();
+    _ytService.dispose();
     super.dispose();
+  }
+
+  void _shareParty() async {
+    final serverUrl = RemoteConfigService().getServerUrl();
+    final partyCode = widget.party["id"];
+    final link = "$serverUrl/join/$partyCode";
+
+    final imageFile = await generatePartyImage(partyCode);
+
+    final params = ShareParams(
+      files: [XFile(imageFile.path)],
+      text:
+          "Join my movie party on Sync Music! Use CODE: $partyCode.\nOr click on this link: $link to join.",
+      title: "Join Sync Music Party",
+    );
+
+    await SharePlus.instance.share(params);
+  }
+
+  void _showAddContentDialog() {
+    // Pause controls timer while dialog is open to prevent overlay from hiding
+    _controlsTimer?.cancel();
+
+    showDialog(
+      context: context,
+      barrierColor: Colors.black87,
+      builder: (context) => _AddContentDialog(
+        ytService: _ytService,
+        onVideoSelected: (video) {
+          ref.read(partyStateProvider.notifier).addTrack(widget.party["id"], {
+            "url": video.url,
+            "title": video.title,
+            "addedBy": widget.username,
+          });
+          Navigator.pop(context);
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text("Added ${video.title}")));
+          _startControlsTimer(); // Resume timer
+        },
+      ),
+    ).then((_) => _startControlsTimer()); // Resume if cancelled
   }
 
   void _onReactionReceived(data) {
@@ -87,10 +136,21 @@ class _MoviePartyScreenState extends ConsumerState<MoviePartyScreen> {
     setState(() => _canPop = true);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
-        Navigator.popUntil(context, (route) => route.isFirst);
-        ScaffoldMessenger.of(
+        // Force portrait before navigation to ensure standard UI look
+        SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
+        SystemChrome.setEnabledSystemUIMode(
+          SystemUiMode.manual,
+          overlays: SystemUiOverlay.values,
+        );
+
+        Navigator.pushReplacement(
           context,
-        ).showSnackBar(SnackBar(content: Text(data['message'] ?? "Party Ended")));
+          MaterialPageRoute(
+            builder: (_) => PartyEndedScreen(
+              message: data['message'] ?? "The host has ended the party.",
+            ),
+          ),
+        );
       }
     });
   }
@@ -133,15 +193,16 @@ class _MoviePartyScreenState extends ConsumerState<MoviePartyScreen> {
   }
 
   void _seek(int seconds) {
-     final state = ref.read(partyStateProvider);
-     if (!state.isPlaying || state.startedAt == null) return; // Only seek while playing for now
+    final state = ref.read(partyStateProvider);
+    if (!state.isPlaying || state.startedAt == null)
+      return; // Only seek while playing for now
 
-     final now = DateTime.now().millisecondsSinceEpoch;
-     final currentPos = (now - state.startedAt!) ~/ 1000;
-     final newPos = (currentPos + seconds).clamp(0, 99999); // Clamp to positive
-     
-     ref.read(partyStateProvider.notifier).seek(widget.party["id"], newPos);
-     _startControlsTimer();
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final currentPos = (now - state.startedAt!) ~/ 1000;
+    final newPos = (currentPos + seconds).clamp(0, 99999); // Clamp to positive
+
+    ref.read(partyStateProvider.notifier).seek(widget.party["id"], newPos);
+    _startControlsTimer();
   }
 
   void _showMembersList() {
@@ -157,8 +218,8 @@ class _MoviePartyScreenState extends ConsumerState<MoviePartyScreen> {
             width: 300,
             margin: const EdgeInsets.only(top: 20, bottom: 20, left: 20),
             decoration: BoxDecoration(
-                color: const Color(0xFF121212).withValues(alpha:0.95),
-                borderRadius: BorderRadius.circular(20),
+              color: const Color(0xFF121212).withValues(alpha: 0.95),
+              borderRadius: BorderRadius.circular(20),
             ),
             padding: const EdgeInsets.all(24.0),
             child: Consumer(
@@ -174,19 +235,26 @@ class _MoviePartyScreenState extends ConsumerState<MoviePartyScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                             const Text(
-                              "MEMBERS",
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontWeight: FontWeight.bold,
-                                letterSpacing: 1.2,
-                                fontSize: 18,
-                              ),
-                            ),
-                            IconButton(onPressed: () => Navigator.pop(context), icon: const Icon(Icons.close, color: Colors.white))
-                        ],
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text(
+                          "MEMBERS",
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                            letterSpacing: 1.2,
+                            fontSize: 18,
+                          ),
+                        ),
+                        IconButton(
+                          onPressed: () => Navigator.pop(context),
+                          icon: const Icon(
+                            FontAwesomeIcons.xmark,
+                            color: Colors.white,
+                            size: 20,
+                          ),
+                        ),
+                      ],
                     ),
                     const SizedBox(height: 16),
                     Expanded(
@@ -220,7 +288,10 @@ class _MoviePartyScreenState extends ConsumerState<MoviePartyScreen> {
                                   ),
                                   title: Text(
                                     "${member['username'] ?? 'Guest'} ${isMe ? '(You)' : ''}",
-                                    style: const TextStyle(color: Colors.white, fontSize: 14),
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 14,
+                                    ),
                                     overflow: TextOverflow.ellipsis,
                                   ),
                                   subtitle: isMemberHost
@@ -236,14 +307,16 @@ class _MoviePartyScreenState extends ConsumerState<MoviePartyScreen> {
                                   trailing: isHost && !isMemberHost
                                       ? IconButton(
                                           icon: const Icon(
-                                            Icons.remove_circle_outline,
+                                            FontAwesomeIcons.circleMinus,
                                             color: Colors.redAccent,
-                                            size: 20,
+                                            size: 18,
                                           ),
                                           onPressed: () {
                                             Navigator.pop(context);
                                             ref
-                                                .read(partyStateProvider.notifier)
+                                                .read(
+                                                  partyStateProvider.notifier,
+                                                )
                                                 .kickUser(
                                                   widget.party['id'],
                                                   member['id'],
@@ -273,10 +346,13 @@ class _MoviePartyScreenState extends ConsumerState<MoviePartyScreen> {
     final queue = ref.watch(partyStateProvider.select((s) => s.queue));
 
     // Listen for unread messages
-    ref.listen(partyStateProvider.select((s) => s.messages.length), (prev, next) {
-        if (!_showChat && (next > (prev ?? 0))) {
-            setState(() => _unreadMessages += (next - (prev ?? 0)));
-        }
+    ref.listen(partyStateProvider.select((s) => s.messages.length), (
+      prev,
+      next,
+    ) {
+      if (!_showChat && (next > (prev ?? 0))) {
+        setState(() => _unreadMessages += (next - (prev ?? 0)));
+      }
     });
 
     return PopScope(
@@ -285,248 +361,383 @@ class _MoviePartyScreenState extends ConsumerState<MoviePartyScreen> {
         if (didPop) return;
         final shouldLeave = await showExitConfirmationDialog(context, isHost);
         if (shouldLeave == true) {
-           if (mounted) {
-              setState(() => _canPop = true);
-              WidgetsBinding.instance.addPostFrameCallback((_) {
-                  if (mounted) Navigator.of(context).pop();
-              });
-           }
+          if (mounted) {
+            setState(() => _canPop = true);
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted) Navigator.of(context).pop();
+            });
+          }
         }
       },
       child: Scaffold(
         backgroundColor: Colors.black,
         body: FloatingEmojis(
-        reactionStream: _reactionStreamCtrl.stream,
-        child: Stack(
-          children: [
-            // 1. VIDEO LAYER (Full Screen)
-            Positioned.fill(
-              child: GestureDetector(
-                onTap: _toggleControls,
-                child: Center(
-                  child: AspectRatio(
-                    aspectRatio: 16 / 9,
-                    child: PartyPlayer(
-                      partyId: widget.party['id'],
-                      isFullScreen: true,
+          reactionStream: _reactionStreamCtrl.stream,
+          child: Stack(
+            children: [
+              // 1. VIDEO LAYER (Full Screen)
+              Positioned.fill(
+                child: GestureDetector(
+                  onTap: _toggleControls,
+                  child: Center(
+                    child: AspectRatio(
+                      aspectRatio: 16 / 9,
+                      child: PartyPlayer(
+                        partyId: widget.party['id'],
+                        isFullScreen: true,
+                        enableControlsOverlay: false,
+                      ),
                     ),
                   ),
                 ),
               ),
-            ),
 
-            // 2. CONTROLS OVERLAY
-            AnimatedOpacity(
-              duration: const Duration(milliseconds: 300),
-              opacity: _showControls ? 1.0 : 0.0,
-              child: IgnorePointer(
-                ignoring: !_showControls,
-                child: Container(
-                  decoration: const BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [
-                        Colors.black54,
-                        Colors.transparent,
-                        Colors.transparent,
-                        Colors.black87,
-                      ],
+              // 2. CONTROLS OVERLAY
+              AnimatedOpacity(
+                duration: const Duration(milliseconds: 300),
+                opacity: _showControls ? 1.0 : 0.0,
+                child: IgnorePointer(
+                  ignoring: !_showControls,
+                  child: Container(
+                    decoration: const BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [
+                          Colors.black54,
+                          Colors.transparent,
+                          Colors.transparent,
+                          Colors.black87,
+                        ],
+                      ),
                     ),
-                  ),
-                  child: SafeArea(
-                    child: Stack(
-                      children: [
-                        // TOP BAR
-                        Positioned(
-                          top: 16,
-                          left: 16,
-                          right: 16,
-                          child: Row(
-                            children: [
-                              IconButton(
-                                icon: const Icon(
-                                  Icons.arrow_back_ios_new_rounded,
-                                  color: Colors.white,
+                    child: SafeArea(
+                      child: Stack(
+                        children: [
+                          // TOP BAR
+                          Positioned(
+                            top: 16,
+                            left: 16,
+                            right: 16,
+                            child: Row(
+                              children: [
+                                IconButton(
+                                  icon: const Icon(
+                                    FontAwesomeIcons.chevronLeft,
+                                    color: Colors.white,
+                                    size: 20,
+                                  ),
+                                  onPressed: () => Navigator.pop(context),
                                 ),
-                                onPressed: () => Navigator.pop(context),
-                              ),
-                              const SizedBox(width: 8),
-                              Text(
-                                widget.party["name"] ?? "Movie Party",
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 16,
-                                  shadows: [Shadow(blurRadius: 10, color: Colors.black)],
+                                const SizedBox(width: 8),
+                                Text(
+                                  widget.party["name"] ?? "Movie Party",
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 16,
+                                    shadows: [
+                                      Shadow(
+                                        blurRadius: 10,
+                                        color: Colors.black,
+                                      ),
+                                    ],
+                                  ),
                                 ),
-                              ),
-                              const Spacer(),
-                              
-                              // Members Button
-                              IconButton(
+                                const Spacer(),
+
+                                // Share Button
+                                IconButton(
+                                  icon: const Icon(
+                                    FontAwesomeIcons.shareFromSquare,
+                                    color: Colors.white,
+                                    size: 20,
+                                  ),
+                                  onPressed: _shareParty,
+                                ),
+
+                                // Add Video Button (Host Only)
+                                if (isHost)
+                                  IconButton(
+                                    icon: const Icon(
+                                      FontAwesomeIcons.plus,
+                                      color: Colors.white,
+                                      size: 20,
+                                    ),
+                                    onPressed: _showAddContentDialog,
+                                  ),
+
+                                // Members Button
+                                IconButton(
                                   onPressed: _showMembersList,
                                   icon: Row(
-                                      children: [
-                                          const Icon(Icons.people, color: Colors.white, size: 20),
-                                          const SizedBox(width: 4),
-                                          Text("$partySize", style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold))
-                                      ],
+                                    children: [
+                                      const Icon(
+                                        FontAwesomeIcons.users,
+                                        color: Colors.white,
+                                        size: 18,
+                                      ),
+                                      const SizedBox(width: 6),
+                                      Text(
+                                        "$partySize",
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                    ],
                                   ),
-                              ),
+                                ),
 
-                              const SizedBox(width: 8),
+                                const SizedBox(width: 8),
 
-                              // Host End Button
-                              if (isHost)
-                                IconButton(
-                                  icon: const Icon(Icons.power_settings_new_rounded, color: Colors.redAccent),
-                                  onPressed: () {
-                                     _startControlsTimer();
-                                     showDialog(
+                                // Host End Button
+                                if (isHost)
+                                  IconButton(
+                                    icon: const Icon(
+                                      FontAwesomeIcons.powerOff,
+                                      color: Colors.redAccent,
+                                      size: 20,
+                                    ),
+                                    onPressed: () {
+                                      _startControlsTimer();
+                                      showDialog(
                                         context: context,
                                         builder: (context) => AlertDialog(
-                                          backgroundColor: const Color(0xFF1E1E1E),
-                                          title: const Text("End Party?", style: TextStyle(color: Colors.white)),
-                                          content: const Text("Terminate the session for everyone?", style: TextStyle(color: Colors.white70)),
+                                          backgroundColor: const Color(
+                                            0xFF1E1E1E,
+                                          ),
+                                          title: const Text(
+                                            "End Party?",
+                                            style: TextStyle(
+                                              color: Colors.white,
+                                            ),
+                                          ),
+                                          content: const Text(
+                                            "Terminate the session for everyone?",
+                                            style: TextStyle(
+                                              color: Colors.white70,
+                                            ),
+                                          ),
                                           actions: [
-                                            TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancel")),
                                             TextButton(
-                                                style: TextButton.styleFrom(foregroundColor: Colors.redAccent),
-                                                onPressed: () {
-                                                    Navigator.pop(context);
-                                                    ref.read(partyStateProvider.notifier).endParty(widget.party['id']);
-                                                }, 
-                                                child: const Text("End Party")
+                                              onPressed: () =>
+                                                  Navigator.pop(context),
+                                              child: const Text("Cancel"),
+                                            ),
+                                            TextButton(
+                                              style: TextButton.styleFrom(
+                                                foregroundColor:
+                                                    Colors.redAccent,
+                                              ),
+                                              onPressed: () {
+                                                Navigator.pop(context);
+                                                ref
+                                                    .read(
+                                                      partyStateProvider
+                                                          .notifier,
+                                                    )
+                                                    .endParty(
+                                                      widget.party['id'],
+                                                    );
+                                              },
+                                              child: const Text("End Party"),
                                             ),
                                           ],
                                         ),
                                       );
-                                  },
-                                ),
-                            ],
-                          ),
-                        ),
-                        
-                        // CENTER CONTROLS (Host Only)
-                        if (isHost && queue.isNotEmpty)
-                            Center(
-                                child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                        IconButton(
-                                            iconSize: 48,
-                                            onPressed: () => _seek(-5),
-                                            icon: const Icon(Icons.replay_5_rounded, color: Colors.white),
-                                        ),
-                                        const SizedBox(width: 24),
-                                        IconButton(
-                                            iconSize: 80,
-                                            onPressed: () {
-                                                final notifier = ref.read(partyStateProvider.notifier);
-                                                if (isPlaying) {
-                                                    notifier.pause(widget.party['id']);
-                                                } else {
-                                                    notifier.play(widget.party['id']);
-                                                }
-                                                _startControlsTimer();
-                                            },
-                                            icon: Icon(
-                                                isPlaying ? Icons.pause_circle_filled_rounded : Icons.play_circle_fill_rounded, 
-                                                color: Colors.white,
-                                                shadows: [BoxShadow(color: Theme.of(context).primaryColor, blurRadius: 20)],
-                                            ),
-                                        ),
-                                        const SizedBox(width: 24),
-                                        IconButton(
-                                            iconSize: 48,
-                                            onPressed: () => _seek(5),
-                                            icon: const Icon(Icons.forward_5_rounded, color: Colors.white),
-                                        ),
-                                    ],
-                                ),
+                                    },
+                                  ),
+                              ],
                             ),
+                          ),
 
-                        // CENTER - ADD VIDEO PROMPT (If empty)
-                        if (queue.isEmpty && isHost)
-                           Center(
-                             child: ElevatedButton.icon(
-                               onPressed: () {
-                                 ScaffoldMessenger.of(context).showSnackBar(
-                                   const SnackBar(content: Text("Use the standard party mode to add videos for now!")),
-                                 );
-                               }, 
-                               icon: const Icon(Icons.add),
-                               label: const Text("Add Movie"),
-                             ),
-                           ),
-
-                        // BOTTOM BAR
-                        Positioned(
-                          bottom: 24,
-                          left: 24,
-                          right: 24,
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              // REACTIONS
-                              ...["🔥", "😂", "😱", "😢", "👏"].map(
-                                (e) => Padding(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 8,
-                                  ),
-                                  child: GestureDetector(
-                                    onTap: () => _sendReaction(e),
-                                    child: Text(
-                                      e,
-                                      style: const TextStyle(fontSize: 32),
-                                    ),
-                                  ),
-                                ),
-                              ),
-                              const Spacer(),
-                              // CHAT TOGGLE
-                              Stack(
-                                clipBehavior: Clip.none,
+                          // CENTER CONTROLS (Host Only)
+                          if (isHost && queue.isNotEmpty)
+                            Center(
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
                                 children: [
-                                    IconButton(
-                                        icon: Icon(
-                                        _showChat
-                                            ? Icons.chat_bubble
-                                            : Icons.chat_bubble_outline,
-                                        color: Colors.white,
-                                        ),
-                                        onPressed: () {
-                                            setState(() {
-                                                _showChat = !_showChat;
-                                                if (_showChat) _unreadMessages = 0;
-                                            });
-                                            if (_showChat) {
-                                                _controlsTimer?.cancel(); 
-                                            } else {
-                                                _startControlsTimer();
-                                            }
-                                        },
+                                  IconButton(
+                                    onPressed: () => _seek(-5),
+                                    icon: const Icon(
+                                      FontAwesomeIcons.rotateLeft,
+                                      color: Colors.white,
+                                      size: 32,
                                     ),
-                                    if (_unreadMessages > 0)
-                                        Positioned(
-                                            right: 8,
-                                            top: 8,
-                                            child: Container(
-                                                padding: const EdgeInsets.all(4),
-                                                decoration: const BoxDecoration(
-                                                    color: Colors.redAccent,
-                                                    shape: BoxShape.circle,
-                                                ),
-                                                child: Text(
-                                                    _unreadMessages > 9 ? "!" : "$_unreadMessages",
-                                                    style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
-                                                ),
-                                            ),
+                                  ),
+                                  const SizedBox(width: 24),
+                                  IconButton(
+                                    onPressed: () {
+                                      final notifier = ref.read(
+                                        partyStateProvider.notifier,
+                                      );
+                                      if (isPlaying) {
+                                        notifier.pause(widget.party['id']);
+                                      } else {
+                                        notifier.play(widget.party['id']);
+                                      }
+                                      _startControlsTimer();
+                                    },
+                                    icon: Icon(
+                                      isPlaying
+                                          ? FontAwesomeIcons.circlePause
+                                          : FontAwesomeIcons.circlePlay,
+                                      color: Colors.white,
+                                      size: 64,
+                                      shadows: [
+                                        BoxShadow(
+                                          color: Theme.of(context).primaryColor,
+                                          blurRadius: 20,
                                         ),
+                                      ],
+                                    ),
+                                  ),
+                                  const SizedBox(width: 24),
+                                  IconButton(
+                                    onPressed: () => _seek(5),
+                                    icon: const Icon(
+                                      FontAwesomeIcons.rotateRight,
+                                      color: Colors.white,
+                                      size: 32,
+                                    ),
+                                  ),
                                 ],
                               ),
-                            ],
+                            ),
+
+                          // CENTER - ADD VIDEO PROMPT (If empty)
+                          if (queue.isEmpty && isHost)
+                            Center(
+                              child: ElevatedButton.icon(
+                                onPressed: _showAddContentDialog,
+                                icon: const Icon(
+                                  FontAwesomeIcons.plus,
+                                  size: 16,
+                                ),
+                                label: const Text("Add Movie"),
+                              ),
+                            ),
+
+                          // BOTTOM BAR
+                          Positioned(
+                            bottom: 24,
+                            left: 24,
+                            right: 24,
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                // REACTIONS
+                                ...["🔥", "😂", "😱", "😢", "👏"].map(
+                                  (e) => Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 8,
+                                    ),
+                                    child: GestureDetector(
+                                      onTap: () => _sendReaction(e),
+                                      child: Text(
+                                        e,
+                                        style: const TextStyle(fontSize: 32),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                const Spacer(),
+                                // CHAT TOGGLE
+                                Stack(
+                                  clipBehavior: Clip.none,
+                                  children: [
+                                    IconButton(
+                                      icon: Icon(
+                                        _showChat
+                                            ? FontAwesomeIcons.solidComment
+                                            : FontAwesomeIcons.comment,
+                                        color: Colors.white,
+                                        size: 24,
+                                      ),
+                                      onPressed: () {
+                                        setState(() {
+                                          _showChat = !_showChat;
+                                          if (_showChat) _unreadMessages = 0;
+                                        });
+                                        if (_showChat) {
+                                          _controlsTimer?.cancel();
+                                        } else {
+                                          _startControlsTimer();
+                                        }
+                                      },
+                                    ),
+                                    if (_unreadMessages > 0)
+                                      Positioned(
+                                        right: 8,
+                                        top: 8,
+                                        child: Container(
+                                          padding: const EdgeInsets.all(4),
+                                          decoration: const BoxDecoration(
+                                            color: Colors.redAccent,
+                                            shape: BoxShape.circle,
+                                          ),
+                                          child: Text(
+                                            _unreadMessages > 9
+                                                ? "!"
+                                                : "$_unreadMessages",
+                                            style: const TextStyle(
+                                              color: Colors.white,
+                                              fontSize: 10,
+                                              fontWeight: FontWeight.bold,
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+
+              // 3. CHAT DRAWER (Right Side)
+              AnimatedPositioned(
+                duration: const Duration(milliseconds: 300),
+                curve: Curves.easeOutCubic,
+                top: 0,
+                bottom: 0,
+                right: _showChat ? 0 : -350,
+                width: 350,
+                child: Container(
+                  color: Colors.black.withValues(alpha: 0.85),
+                  child: SafeArea(
+                    child: Column(
+                      children: [
+                        Row(
+                          children: [
+                            IconButton(
+                              icon: const Icon(
+                                FontAwesomeIcons.xmark,
+                                color: Colors.white,
+                                size: 20,
+                              ),
+                              onPressed: () =>
+                                  setState(() => _showChat = false),
+                            ),
+                            const Text(
+                              "Chat",
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        ),
+                        Expanded(
+                          child: PartyChat(
+                            partyId: widget.party['id'],
+                            username: widget.username,
                           ),
                         ),
                       ],
@@ -534,44 +745,163 @@ class _MoviePartyScreenState extends ConsumerState<MoviePartyScreen> {
                   ),
                 ),
               ),
-            ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
 
-            // 3. CHAT DRAWER (Right Side)
-            AnimatedPositioned(
-              duration: const Duration(milliseconds: 300),
-              curve: Curves.easeOutCubic,
-              top: 0,
-              bottom: 0,
-              right: _showChat ? 0 : -350,
-              width: 350,
-              child: Container(
-                color: Colors.black.withValues(alpha:0.85),
-                child: SafeArea(
-                  child: Column(
-                    children: [
-                       Row(
-                         children: [
-                           IconButton(
-                             icon: const Icon(Icons.close, color: Colors.white),
-                             onPressed: () => setState(() => _showChat = false),
-                           ),
-                           const Text("Chat", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                         ],
-                       ),
-                       Expanded(
-                         child: PartyChat(
-                            partyId: widget.party['id'],
-                            username: widget.username,
-                         ),
-                       ),
-                    ],
-                  ),
+class _AddContentDialog extends StatefulWidget {
+  final YouTubeService ytService;
+  final Function(yt.Video) onVideoSelected;
+
+  const _AddContentDialog({
+    required this.ytService,
+    required this.onVideoSelected,
+  });
+
+  @override
+  State<_AddContentDialog> createState() => _AddContentDialogState();
+}
+
+class _AddContentDialogState extends State<_AddContentDialog> {
+  final TextEditingController _searchCtrl = TextEditingController();
+  List<yt.Video> _results = [];
+  bool _isLoading = false;
+  Timer? _debounce;
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    _debounce?.cancel();
+    super.dispose();
+  }
+
+  void _onSearchChanged(String query) {
+    if (_debounce?.isActive ?? false) _debounce!.cancel();
+
+    if (query.isEmpty) {
+      setState(() => _results = []);
+      return;
+    }
+
+    setState(() => _isLoading = true);
+    _debounce = Timer(const Duration(milliseconds: 600), () async {
+      try {
+        final results = await widget.ytService.searchVideos(query);
+        if (mounted) setState(() => _results = results);
+      } finally {
+        if (mounted) setState(() => _isLoading = false);
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      backgroundColor: const Color(0xFF1E1E1E),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      insetPadding: const EdgeInsets.all(24),
+      child: Container(
+        width: 500, // Limit width in landscape
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              "Add Movie / Song",
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: _searchCtrl,
+              onChanged: _onSearchChanged,
+              autofocus: true,
+              style: const TextStyle(color: Colors.white),
+              decoration: InputDecoration(
+                hintText: "Search YouTube...",
+                hintStyle: const TextStyle(color: Colors.white38),
+                filled: true,
+                fillColor: Colors.white10,
+                prefixIcon: const Icon(
+                  FontAwesomeIcons.magnifyingGlass,
+                  color: Colors.white54,
+                  size: 16,
                 ),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide.none,
+                ),
+                suffixIcon: _isLoading
+                    ? Transform.scale(
+                        scale: 0.4,
+                        child: const CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : null,
+              ),
+            ),
+            const SizedBox(height: 16),
+            Expanded(
+              child: _results.isEmpty
+                  ? Center(
+                      child: Text(
+                        _searchCtrl.text.isEmpty
+                            ? "Type to search"
+                            : "No results",
+                        style: const TextStyle(color: Colors.white38),
+                      ),
+                    )
+                  : ListView.builder(
+                      itemCount: _results.length,
+                      itemBuilder: (context, index) {
+                        final video = _results[index];
+                        return ListTile(
+                          leading: ClipRRect(
+                            borderRadius: BorderRadius.circular(4),
+                            child: Image.network(
+                              video.thumbnails.lowResUrl,
+                              width: 50,
+                              height: 40,
+                              fit: BoxFit.cover,
+                            ),
+                          ),
+                          title: Text(
+                            video.title,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 14,
+                            ),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          subtitle: Text(
+                            video.author,
+                            style: const TextStyle(
+                              color: Colors.white54,
+                              fontSize: 12,
+                            ),
+                          ),
+                          onTap: () => widget.onVideoSelected(video),
+                        );
+                      },
+                    ),
+            ),
+            const SizedBox(height: 8),
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text("Close"),
               ),
             ),
           ],
         ),
-      ),
       ),
     );
   }

@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:sync_music/providers/explore_provider.dart';
 import 'package:sync_music/providers/party_provider.dart';
 import 'package:sync_music/providers/user_provider.dart';
@@ -39,10 +40,6 @@ class _ExploreScreenState extends ConsumerState<ExploreScreen> {
   }
 
   void _fetchParties({bool isAutoRefresh = false}) {
-    // We can add a flag to provider to not set 'isLoading' on auto-refresh if desired,
-    // but the current simple fetch is fine. It just refreshes data.
-    // If you want to avoid loading spinner on auto-refresh, you'd modify provider.
-    // For now, simple fetch is standard.
     ref.read(exploreProvider.notifier).fetchParties();
   }
 
@@ -84,7 +81,7 @@ class _ExploreScreenState extends ConsumerState<ExploreScreen> {
         actions: [
           IconButton(
             splashRadius: 20,
-            icon: const Icon(Icons.refresh_rounded),
+            icon: const Icon(FontAwesomeIcons.arrowsRotate, size: 18),
             onPressed: () => _fetchParties(),
           ),
         ],
@@ -140,8 +137,9 @@ class _ExploreScreenState extends ConsumerState<ExploreScreen> {
                                     ),
                                   ),
                                   child: const Icon(
-                                    Icons.music_note_rounded,
+                                    FontAwesomeIcons.music,
                                     color: Colors.white,
+                                    size: 18,
                                   ),
                                 ),
 
@@ -199,8 +197,8 @@ class _ExploreScreenState extends ConsumerState<ExploreScreen> {
                                       child: Row(
                                         children: [
                                           const Icon(
-                                            Icons.people_rounded,
-                                            size: 12,
+                                            FontAwesomeIcons.users,
+                                            size: 10,
                                             color: Colors.white,
                                           ),
                                           const SizedBox(width: 4),
@@ -217,7 +215,7 @@ class _ExploreScreenState extends ConsumerState<ExploreScreen> {
                                     ),
                                     const SizedBox(height: 6),
                                     Icon(
-                                      Icons.arrow_forward_ios_rounded,
+                                      FontAwesomeIcons.chevronRight,
                                       size: 14,
                                       color: Colors.white.withValues(alpha:0.3),
                                     ),
@@ -407,8 +405,8 @@ class _EmptyState extends StatelessWidget {
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           Icon(
-            Icons.queue_music_rounded,
-            size: 64,
+            FontAwesomeIcons.list,
+            size: 48,
             color: Colors.white.withValues(alpha:0.25),
           ),
           const SizedBox(height: 16),
@@ -431,7 +429,7 @@ class _EmptyState extends StatelessWidget {
           const SizedBox(height: 16),
           TextButton.icon(
             onPressed: onRefresh,
-            icon: const Icon(Icons.refresh_rounded),
+            icon: const Icon(FontAwesomeIcons.arrowsRotate, size: 14),
             label: const Text("Refresh"),
           ),
         ],

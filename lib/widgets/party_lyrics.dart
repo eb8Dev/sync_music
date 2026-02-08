@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:sync_music/providers/party_state_provider.dart';
 import 'package:sync_music/services/lyrics_service.dart';
 
@@ -78,7 +79,7 @@ class _PartyLyricsState extends ConsumerState<PartyLyrics>
                      child: Column(
                        mainAxisSize: MainAxisSize.min,
                        children: [
-                         const Icon(Icons.error_outline, color: Colors.white38, size: 48),
+                         const Icon(FontAwesomeIcons.circleExclamation, color: Colors.white38, size: 40),
                          const SizedBox(height: 12),
                          Text(
                            "Could not load lyrics.\n${snapshot.error.toString().contains('Timeout') ? 'Connection timed out' : 'Network error'}", 
@@ -88,7 +89,7 @@ class _PartyLyricsState extends ConsumerState<PartyLyrics>
                          const SizedBox(height: 16),
                          ElevatedButton.icon(
                             onPressed: () => _loadLyrics(title),
-                            icon: const Icon(Icons.refresh),
+                            icon: const Icon(FontAwesomeIcons.arrowsRotate, size: 14),
                             label: const Text("Retry"),
                             style: ElevatedButton.styleFrom(
                               backgroundColor: Colors.white.withValues(alpha:0.1),

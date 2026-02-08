@@ -32,20 +32,37 @@ class LyricsService {
 
   Future<String?> _search(String query) async {
       final url = Uri.parse('$_searchUrl?q=${Uri.encodeComponent(query)}');
-      final response = await http.get(url).timeout(const Duration(seconds: 4));
+      
+      int attempts = 0;
+      while (attempts < 3) {
+        try {
+          final response = await http.get(url).timeout(const Duration(seconds: 10));
 
-      if (response.statusCode == 200) {
-        final List<dynamic> data = json.decode(response.body);
-        if (data.isEmpty) return null;
+          if (response.statusCode == 200) {
+            final List<dynamic> data = json.decode(response.body);
+            if (data.isEmpty) return null;
 
-        final match = data.firstWhere(
-          (item) => item['plainLyrics'] != null && (item['plainLyrics'] as String).isNotEmpty,
-          orElse: () => null,
-        );
-        return match != null ? match['plainLyrics'] : null;
+            final match = data.firstWhere(
+              (item) => item['plainLyrics'] != null && (item['plainLyrics'] as String).isNotEmpty,
+              orElse: () => null,
+            );
+            return match != null ? match['plainLyrics'] : null;
+          } else {
+             // If server error (5xx), maybe retry. If 4xx, probably don't retry.
+             if (response.statusCode >= 500) {
+                throw Exception("Server Error: ${response.statusCode}");
+             }
+             // For 4xx errors, just return null (not found/bad request)
+             return null;
+          }
+        } catch (e) {
+          attempts++;
+          if (attempts >= 3) rethrow;
+          // Exponential backoff: 1s, 2s
+          await Future.delayed(Duration(seconds: attempts)); 
+        }
       }
-      // Throw exception for non-200 to trigger error state in UI
-      throw Exception("Service Unavailable (Status: ${response.statusCode})");
+      return null;
   }
 
   String _cleanTitle(String title) {

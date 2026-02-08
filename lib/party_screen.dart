@@ -2,12 +2,15 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import 'package:sync_music/models/playlist_model.dart';
 import 'package:sync_music/providers/party_provider.dart';
 import 'package:sync_music/providers/party_state_provider.dart';
 import 'package:sync_music/providers/socket_provider.dart';
+import 'package:sync_music/services/remote_config_service.dart';
 import 'package:sync_music/widgets/floating_emojis.dart';
+import 'package:sync_music/widgets/generate_party_image.dart';
 import 'package:sync_music/widgets/party_chat.dart';
-import 'package:sync_music/widgets/party_controls.dart';
 import 'package:sync_music/widgets/party_lyrics.dart';
 import 'package:sync_music/widgets/party_player.dart';
 import 'package:sync_music/widgets/party_queue.dart';
@@ -17,6 +20,10 @@ import 'package:wakelock_plus/wakelock_plus.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:sync_music/widgets/exit_confirmation_dialog.dart';
+import 'package:sync_music/party_ended_screen.dart';
+import 'package:sync_music/widgets/add_to_playlist_sheet.dart';
+import 'package:sync_music/widgets/playlist_import_sheet.dart';
+import 'package:sync_music/party_kicked_screen.dart';
 
 class PartyScreen extends ConsumerStatefulWidget {
   final Map<String, dynamic> party;
@@ -28,10 +35,10 @@ class PartyScreen extends ConsumerStatefulWidget {
   ConsumerState<PartyScreen> createState() => _PartyScreenState();
 }
 
-class _PartyScreenState extends ConsumerState<PartyScreen>
-    with SingleTickerProviderStateMixin {
+class _PartyScreenState extends ConsumerState<PartyScreen> {
   final YouTubeService _ytService = YouTubeService();
   final TextEditingController searchCtrl = TextEditingController();
+  final GlobalKey<PartyPlayerState> _playerKey = GlobalKey<PartyPlayerState>();
 
   Timer? _debounce;
   List<yt.Video> searchResults = [];
@@ -39,7 +46,7 @@ class _PartyScreenState extends ConsumerState<PartyScreen>
   bool isPlaylistDetected = false;
   bool _canPop = false;
 
-  late TabController _tabController;
+  int _selectedIndex = 0;
   int _unreadMessages = 0;
 
   final StreamController<String> _reactionStreamCtrl =
@@ -83,24 +90,19 @@ class _PartyScreenState extends ConsumerState<PartyScreen>
     super.initState();
     WakelockPlus.enable();
 
-    // 3 Tabs: Queue, Lyrics, Chat
-    _tabController = TabController(length: 3, vsync: this);
-    _tabController.addListener(_handleTabSelection);
-
     // Subscribe to reactions
     final socket = ref.read(socketProvider);
     socket.on("REACTION", _onReactionReceived);
-    socket.on("PARTY_ENDED", _onPartyEnded);
-    socket.on("KICKED", _onKicked);
   }
 
-  void _handleTabSelection() {
-    // If Chat tab (index 2) is selected, clear unread
-    if (_tabController.index == 2) {
-      setState(() {
+  void _onItemTapped(int index) {
+    setState(() {
+      _selectedIndex = index;
+      // If Chat tab (index 2) is selected, clear unread
+      if (_selectedIndex == 2) {
         _unreadMessages = 0;
-      });
-    }
+      }
+    });
   }
 
   void _onReactionReceived(data) {
@@ -108,44 +110,14 @@ class _PartyScreenState extends ConsumerState<PartyScreen>
     _reactionStreamCtrl.add(data['emoji']);
   }
 
-  void _onPartyEnded(data) {
-    if (!mounted) return;
-    setState(() => _canPop = true);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) {
-        Navigator.popUntil(context, (route) => route.isFirst);
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text(data['message'] ?? "Party Ended")));
-      }
-    });
-  }
-
-  void _onKicked(data) {
-    if (!mounted) return;
-    setState(() => _canPop = true);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) {
-        Navigator.popUntil(context, (route) => route.isFirst);
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("You have been kicked from the party.")),
-        );
-      }
-    });
-  }
-
   @override
   void dispose() {
     final socket = ref.read(socketProvider);
     socket.off("REACTION", _onReactionReceived);
-    socket.off("PARTY_ENDED", _onPartyEnded);
-    socket.off("KICKED", _onKicked);
 
     WakelockPlus.disable();
     searchCtrl.dispose();
     _reactionStreamCtrl.close();
-    _tabController.removeListener(_handleTabSelection);
-    _tabController.dispose();
     _ytService.dispose();
     _debounce?.cancel();
     super.dispose();
@@ -185,52 +157,52 @@ class _PartyScreenState extends ConsumerState<PartyScreen>
   Future<void> _importPlaylist() async {
     final url = searchCtrl.text.trim();
     if (url.isEmpty) return;
-    
+
     // Unfocus and show loading state
     FocusScope.of(context).unfocus();
     setState(() {
-        isSearching = true; // Use searching flag to show spinner if needed
-        isPlaylistDetected = false; 
+      isSearching = true; // Use searching flag to show spinner if needed
+      isPlaylistDetected = false;
     });
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text("Importing top 15 songs from playlist...")),
     );
 
     try {
-        final videos = await _ytService.getPlaylistVideos(url);
-        
-        // Add them one by one (or batch if backend supported it, but loop is fine for now)
-        int count = 0;
-        for (var video in videos) {
-            // Check playable logic? Maybe skip for speed, rely on later check
-            ref.read(partyStateProvider.notifier).addTrack(widget.party["id"], {
-                "url": video.url,
-                "title": video.title,
-                "addedBy": widget.username,
-            });
-            count++;
-            // Small delay to prevent flooding if socket is sensitive (optional)
-            await Future.delayed(const Duration(milliseconds: 50)); 
-        }
+      final videos = await _ytService.getPlaylistVideos(url);
 
-        if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text("Successfully added $count songs!")),
-            );
-        }
+      // Add them one by one (or batch if backend supported it, but loop is fine for now)
+      int count = 0;
+      for (var video in videos) {
+        // Check playable logic? Maybe skip for speed, rely on later check
+        ref.read(partyStateProvider.notifier).addTrack(widget.party["id"], {
+          "url": video.url,
+          "title": video.title,
+          "addedBy": widget.username,
+        });
+        count++;
+        // Small delay to prevent flooding if socket is sensitive (optional)
+        await Future.delayed(const Duration(milliseconds: 50));
+      }
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Successfully added $count songs!")),
+        );
+      }
     } catch (e) {
-         if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text("Failed to import playlist.")),
-            );
-         }
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Failed to import playlist.")),
+        );
+      }
     } finally {
-        if (mounted) {
-             setState(() {
-                 isSearching = false;
-                 searchCtrl.clear();
-             });
-        }
+      if (mounted) {
+        setState(() {
+          isSearching = false;
+          searchCtrl.clear();
+        });
+      }
     }
   }
 
@@ -256,14 +228,249 @@ class _PartyScreenState extends ConsumerState<PartyScreen>
     );
   }
 
-  void _shareParty() {
-    Share.share(
-      "Join my music party! Code: ${widget.party['id']}\nLink: https://sync-music-server.onrender.com/join/${widget.party['id']}",
+  void _shareParty() async {
+    final serverUrl = RemoteConfigService().getServerUrl();
+    final partyCode = widget.party["id"];
+    final link = "$serverUrl/join/$partyCode";
+
+    // Generate the image
+    final imageFile = await generatePartyImage(partyCode);
+
+    // Prepare ShareParams
+    final params = ShareParams(
+      files: [XFile(imageFile.path)],
+      text:
+          "Join my music party on Sync Music! Use CODE: $partyCode.\nOr click on this link: $link to join.",
+      title: "Join Sync Music Party",
     );
+
+    // Share
+    final result = await SharePlus.instance.share(params);
+
+    if (result.status == ShareResultStatus.dismissed) {
+      print("User dismissed sharing.");
+    }
   }
 
-  void _changeTheme() {
-    ref.read(partyStateProvider.notifier).changeTheme(widget.party["id"]);
+  void _showSettings() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF1E1E1E),
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => Consumer(
+        builder: (context, ref, _) {
+          final settings = ref.watch(
+            partyStateProvider.select((s) => s.settings),
+          );
+          final themeIndex = ref.watch(
+            partyStateProvider.select((s) => s.themeIndex),
+          );
+
+          void update(String key, bool value) {
+            final newSettings = Map<String, bool>.from(settings);
+            newSettings[key] = value;
+            ref
+                .read(partyStateProvider.notifier)
+                .updateSettings(widget.party['id'], newSettings);
+          }
+
+          void applyPreset(String type) {
+            Map<String, bool> newSettings = {};
+            if (type == 'host') {
+              newSettings = {
+                "guestControls": false,
+                "guestQueueing": false,
+                "voteSkip": false,
+              };
+            } else if (type == 'guest') {
+              newSettings = {
+                "guestControls": false,
+                "guestQueueing": true,
+                "voteSkip": true,
+              };
+            } else if (type == 'collab') {
+              newSettings = {
+                "guestControls": true,
+                "guestQueueing": true,
+                "voteSkip": false,
+              };
+            }
+            ref
+                .read(partyStateProvider.notifier)
+                .updateSettings(widget.party['id'], newSettings);
+          }
+
+          return Container(
+            padding: const EdgeInsets.all(24.0),
+            height: MediaQuery.of(context).size.height * 0.75,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Center(
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: Colors.white24,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 20),
+                const Text(
+                  "Party Settings",
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 24),
+
+                // ---- PRESETS ----
+                const Text(
+                  "PRESETS",
+                  style: TextStyle(
+                    color: Colors.white54,
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 1,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      child: _PresetCard(
+                        icon: FontAwesomeIcons.shieldHalved,
+                        label: "Host Mode",
+                        color: Colors.redAccent,
+                        onTap: () => applyPreset('host'),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: _PresetCard(
+                        icon: FontAwesomeIcons.checkToSlot,
+                        label: "Guest Mode",
+                        color: Colors.blueAccent,
+                        onTap: () => applyPreset('guest'),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: _PresetCard(
+                        icon: FontAwesomeIcons.handshake,
+                        label: "Collab",
+                        color: Colors.greenAccent,
+                        onTap: () => applyPreset('collab'),
+                      ),
+                    ),
+                  ],
+                ),
+
+                const SizedBox(height: 32),
+
+                // ---- CONTROLS ----
+                const Text(
+                  "PERMISSIONS",
+                  style: TextStyle(
+                    color: Colors.white54,
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 1,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                _SwitchTile(
+                  label: "Guest Controls",
+                  subtitle: "Allow guests to Play, Pause & Seek",
+                  value: settings["guestControls"] ?? false,
+                  onChanged: (v) => update("guestControls", v),
+                ),
+                _SwitchTile(
+                  label: "Guest Queueing",
+                  subtitle: "Allow guests to add songs",
+                  value: settings["guestQueueing"] ?? true,
+                  onChanged: (v) => update("guestQueueing", v),
+                ),
+                _SwitchTile(
+                  label: "Voting to Skip",
+                  subtitle: "Enable vote-to-skip system",
+                  value: settings["voteSkip"] ?? true,
+                  onChanged: (v) => update("voteSkip", v),
+                ),
+
+                const SizedBox(height: 32),
+
+                // ---- THEME ----
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text(
+                      "THEME",
+                      style: TextStyle(
+                        color: Colors.white54,
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 1,
+                      ),
+                    ),
+                    Text(
+                      "Current: #${themeIndex + 1}",
+                      style: const TextStyle(
+                        color: Colors.white30,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                SizedBox(
+                  height: 60,
+                  child: ListView.separated(
+                    scrollDirection: Axis.horizontal,
+                    itemCount: _themes.length,
+                    separatorBuilder: (_, __) => const SizedBox(width: 12),
+                    itemBuilder: (context, index) {
+                      final isSelected = themeIndex == index;
+                      return GestureDetector(
+                        onTap: () {
+                          ref
+                              .read(partyStateProvider.notifier)
+                              .changeTheme(widget.party['id']);
+                        },
+                        child: Container(
+                          width: 60,
+                          height: 60,
+                          decoration: BoxDecoration(
+                            gradient: _themes[index],
+                            borderRadius: BorderRadius.circular(12),
+                            border: isSelected
+                                ? Border.all(color: Colors.white, width: 2)
+                                : null,
+                          ),
+                          child: isSelected
+                              ? const Icon(
+                                  FontAwesomeIcons.check,
+                                  color: Colors.white,
+                                  size: 18,
+                                )
+                              : null,
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
   }
 
   void _showQRCode() {
@@ -324,7 +531,64 @@ class _PartyScreenState extends ConsumerState<PartyScreen>
   }
 
   void _leaveParty() {
-    Navigator.pop(context);
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF1E1E1E),
+        title: const Text(
+          "Leave Party?",
+          style: TextStyle(color: Colors.white),
+        ),
+        content: const Text(
+          "You can leave now and rejoin later with an invite. The party will be waiting 🎶",
+          style: TextStyle(color: Colors.white70),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text("Cancel"),
+          ),
+          TextButton(
+            style: TextButton.styleFrom(foregroundColor: Colors.redAccent),
+            onPressed: () {
+              Navigator.pop(context);
+              Navigator.pop(context);
+            },
+            child: const Text("Leave Party"),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _endParty() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF1E1E1E),
+        title: const Text("End Party?", style: TextStyle(color: Colors.white)),
+        content: const Text(
+          "This will kick all members and close the party. Are you sure?",
+          style: TextStyle(color: Colors.white70),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text("Cancel"),
+          ),
+          TextButton(
+            style: TextButton.styleFrom(foregroundColor: Colors.redAccent),
+            onPressed: () {
+              Navigator.pop(context);
+              ref
+                  .read(partyStateProvider.notifier)
+                  .endParty(widget.party["id"]);
+            },
+            child: const Text("End Party"),
+          ),
+        ],
+      ),
+    );
   }
 
   void _showMembersList() {
@@ -404,8 +668,9 @@ class _PartyScreenState extends ConsumerState<PartyScreen>
                                 trailing: isHost && !isMemberHost
                                     ? IconButton(
                                         icon: const Icon(
-                                          Icons.remove_circle_outline,
+                                          FontAwesomeIcons.circleMinus,
                                           color: Colors.redAccent,
+                                          size: 18,
                                         ),
                                         onPressed: () {
                                           Navigator.pop(context);
@@ -438,62 +703,71 @@ class _PartyScreenState extends ConsumerState<PartyScreen>
     _reactionStreamCtrl.add(emoji); // Local feedback immediate
   }
 
+  void _addToLocalPlaylistDialog(yt.Video video) {
+    final song = Song(
+      id: video.id.value,
+      title: video.title,
+      url: video.url,
+      thumbnail: video.thumbnails.lowResUrl,
+      artist: video.author,
+      duration: video.duration.toString(),
+    );
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent, // Handled by sheet
+      isScrollControlled: true,
+      builder: (context) => AddToPlaylistSheet(song: song),
+    );
+  }
+
+  void _showMyPlaylistsImport() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent, // Handled by sheet
+      isScrollControlled: true,
+      builder: (context) => PlaylistImportSheet(
+        partyId: widget.party["id"],
+        username: widget.username,
+      ),
+    );
+  }
+
   // ---- BUILD HELPERS ----
   Widget _buildSearchBar() {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-      color: Colors.transparent,
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
       child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // ---- SPECIAL ACTIONS (Import) ----
-          if (isPlaylistDetected)
-            Padding(
-                padding: const EdgeInsets.only(bottom: 12),
-                child: SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton.icon(
-                        style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFF6C63FF),
-                            foregroundColor: Colors.white,
-                            padding: const EdgeInsets.all(16),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                        ),
-                        onPressed: _importPlaylist,
-                        icon: const Icon(Icons.playlist_add_rounded),
-                        label: const Text("Import Playlist (Top 15 Songs)"),
-                    ),
-                ),
-            ),
-
-          // ---- SEARCH RESULTS ----
+          // ---- SEARCH RESULTS (TOP) ----
           if (searchCtrl.text.isNotEmpty && !isPlaylistDetected)
             Container(
-              constraints: const BoxConstraints(maxHeight: 160),
-              margin: const EdgeInsets.only(bottom: 10),
+              margin: const EdgeInsets.only(bottom: 8),
+              constraints: const BoxConstraints(maxHeight: 220),
               decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha:0.04),
+                color: Colors.white.withValues(alpha: 0.05),
                 borderRadius: BorderRadius.circular(14),
               ),
               child: searchResults.isEmpty
-                  ? Center(
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                        child: Text(
-                          "No videos found",
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: Colors.white.withValues(alpha:0.4),
-                            letterSpacing: 0.3,
-                          ),
+                  ? Padding(
+                      padding: const EdgeInsets.all(14),
+                      child: Text(
+                        "No videos found",
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.white.withValues(alpha: 0.4),
                         ),
                       ),
                     )
                   : ListView.separated(
                       shrinkWrap: true,
+                      padding: const EdgeInsets.symmetric(vertical: 6),
                       itemCount: searchResults.length,
                       separatorBuilder: (_, __) => Divider(
                         height: 1,
-                        color: Colors.white.withValues(alpha:0.05),
+                        color: Colors.white.withValues(alpha: 0.06),
                       ),
                       itemBuilder: (_, i) {
                         final video = searchResults[i];
@@ -501,7 +775,7 @@ class _PartyScreenState extends ConsumerState<PartyScreen>
                           onTap: () => _addVideo(video),
                           child: Padding(
                             padding: const EdgeInsets.symmetric(
-                              horizontal: 12,
+                              horizontal: 10,
                               vertical: 8,
                             ),
                             child: Row(
@@ -510,8 +784,8 @@ class _PartyScreenState extends ConsumerState<PartyScreen>
                                   borderRadius: BorderRadius.circular(6),
                                   child: Image.network(
                                     video.thumbnails.lowResUrl,
-                                    width: 36,
-                                    height: 36,
+                                    width: 34,
+                                    height: 34,
                                     fit: BoxFit.cover,
                                   ),
                                 ),
@@ -527,6 +801,16 @@ class _PartyScreenState extends ConsumerState<PartyScreen>
                                     ),
                                   ),
                                 ),
+                                IconButton(
+                                  iconSize: 18,
+                                  padding: EdgeInsets.zero,
+                                  icon: const Icon(
+                                    Icons.playlist_add,
+                                    color: Colors.white70,
+                                  ),
+                                  onPressed: () =>
+                                      _addToLocalPlaylistDialog(video),
+                                ),
                               ],
                             ),
                           ),
@@ -535,31 +819,52 @@ class _PartyScreenState extends ConsumerState<PartyScreen>
                     ),
             ),
 
-          // ---- SEARCH INPUT ----
+          // ---- ACTION CHIPS ----
+          Wrap(
+            spacing: 8,
+            children: [
+              if (isPlaylistDetected)
+                _ActionChip(
+                  icon: FontAwesomeIcons.fileImport,
+                  label: "Import playlist",
+                  color: const Color(0xFF6C63FF),
+                  onTap: _importPlaylist,
+                ),
+              _ActionChip(
+                icon: FontAwesomeIcons.compactDisc,
+                label: "My playlists",
+                onTap: _showMyPlaylistsImport,
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 8),
+
+          // ---- SEARCH FIELD (BOTTOM) ----
           TextField(
             controller: searchCtrl,
             onChanged: _onSearchChanged,
             textInputAction: TextInputAction.search,
             style: const TextStyle(color: Colors.white, fontSize: 13),
             decoration: InputDecoration(
-              hintText: "Search YouTube or Paste Playlist Link",
+              hintText: "Search YouTube or paste playlist link",
               hintStyle: TextStyle(
-                color: Colors.white.withValues(alpha:0.4),
+                color: Colors.white.withValues(alpha: 0.35),
                 fontSize: 12,
               ),
               filled: true,
-              fillColor: Colors.white.withValues(alpha:0.06),
+              fillColor: Colors.white.withValues(alpha: 0.06),
               contentPadding: const EdgeInsets.symmetric(
-                horizontal: 16,
-                vertical: 12,
+                horizontal: 14,
+                vertical: 11,
               ),
               prefixIcon: Icon(
-                Icons.search_rounded,
-                color: Colors.white.withValues(alpha:0.4),
-                size: 18,
+                FontAwesomeIcons.magnifyingGlass,
+                size: 14,
+                color: Colors.white.withValues(alpha: 0.4),
               ),
               border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(24),
+                borderRadius: BorderRadius.circular(22),
                 borderSide: BorderSide.none,
               ),
             ),
@@ -581,13 +886,73 @@ class _PartyScreenState extends ConsumerState<PartyScreen>
             child: Container(
               padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha:0.08),
+                color: Colors.white.withValues(alpha: 0.08),
                 borderRadius: BorderRadius.circular(22),
               ),
               child: Text(emoji, style: const TextStyle(fontSize: 22)),
             ),
           );
         }).toList(),
+      ),
+    );
+  }
+
+  Widget _buildBottomNavItem(
+    int index,
+    IconData icon,
+    String label, {
+    bool hasBadge = false,
+  }) {
+    final isSelected = _selectedIndex == index;
+    final color = isSelected
+        ? Theme.of(context).primaryColor
+        : Colors.white.withValues(alpha: 0.4);
+
+    return InkWell(
+      onTap: () => _onItemTapped(index),
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Stack(
+              clipBehavior: Clip.none,
+              children: [
+                Icon(icon, color: color, size: 20),
+                if (hasBadge && _unreadMessages > 0)
+                  Positioned(
+                    right: -6,
+                    top: -6,
+                    child: Container(
+                      padding: const EdgeInsets.all(4),
+                      decoration: const BoxDecoration(
+                        color: Colors.redAccent,
+                        shape: BoxShape.circle,
+                      ),
+                      child: Text(
+                        _unreadMessages > 9 ? "9+" : "$_unreadMessages",
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 8,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Text(
+              label,
+              style: TextStyle(
+                color: color,
+                fontSize: 10,
+                fontWeight: FontWeight.bold,
+                letterSpacing: 0.5,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -609,11 +974,48 @@ class _PartyScreenState extends ConsumerState<PartyScreen>
       prev,
       next,
     ) {
-      if (_tabController.index != 2) {
+      if (_selectedIndex != 2) {
         final diff = next - (prev ?? 0);
         if (diff > 0) {
           setState(() {
             _unreadMessages += diff;
+          });
+        }
+      }
+    });
+
+    // Listen for Party Ended State
+    ref.listen(partyProvider.select((s) => s.isPartyEnded), (prev, ended) {
+      if (ended) {
+        if (mounted) {
+          setState(() => _canPop = true);
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) {
+              final message = ref.read(partyProvider).endMessage;
+              Navigator.of(context).pushReplacement(
+                MaterialPageRoute(
+                  builder: (_) => PartyEndedScreen(
+                    message: message ?? "The host has ended the party.",
+                  ),
+                ),
+              );
+            }
+          });
+        }
+      }
+    });
+
+    // Listen for Kicked State
+    ref.listen(partyProvider.select((s) => s.isKicked), (prev, kicked) {
+      if (kicked) {
+        if (mounted) {
+          setState(() => _canPop = true);
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) {
+              Navigator.of(context).pushReplacement(
+                MaterialPageRoute(builder: (_) => const PartyKickedScreen()),
+              );
+            }
           });
         }
       }
@@ -625,7 +1027,7 @@ class _PartyScreenState extends ConsumerState<PartyScreen>
         if (mounted) {
           setState(() => _canPop = true);
           WidgetsBinding.instance.addPostFrameCallback((_) {
-             if (mounted) Navigator.popUntil(context, (route) => route.isFirst);
+            if (mounted) Navigator.popUntil(context, (route) => route.isFirst);
           });
         }
       }
@@ -648,240 +1050,232 @@ class _PartyScreenState extends ConsumerState<PartyScreen>
         }
       },
       child: Scaffold(
+        resizeToAvoidBottomInset:
+            true, // Allows content to move up for keyboard
         body: FloatingEmojis(
           reactionStream: _reactionStreamCtrl.stream,
-          child: Container(
-          decoration: BoxDecoration(gradient: _themes[themeIndex]),
-          child: SafeArea(
-            child: Column(
-              children: [
-                // ---- HEADER ----
-                Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 20,
-                    vertical: 16,
-                  ),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      // Party Code & Connection
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+          child: RepaintBoundary(
+            child: Container(
+              decoration: BoxDecoration(gradient: _themes[themeIndex]),
+              child: SafeArea(
+                child: Column(
+                  children: [
+                    // ---- HEADER ----
+                    Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 20,
+                        vertical: 16,
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          if (isDisconnected)
-                            Padding(
-                              padding: const EdgeInsets.only(bottom: 4),
-                              child: Row(
-                                children: [
-                                  const SizedBox(
-                                    width: 8,
-                                    height: 8,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                      color: Colors.redAccent,
-                                    ),
+                          // Party Code & Connection
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              if (isDisconnected)
+                                Padding(
+                                  padding: const EdgeInsets.only(bottom: 4),
+                                  child: Row(
+                                    children: [
+                                      const SizedBox(
+                                        width: 8,
+                                        height: 8,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                          color: Colors.redAccent,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 6),
+                                      Text(
+                                        "Reconnecting...",
+                                        style: TextStyle(
+                                          color: Colors.redAccent,
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                    ],
                                   ),
-                                  const SizedBox(width: 6),
-                                  Text(
-                                    "Reconnecting...",
-                                    style: TextStyle(
-                                      color: Colors.redAccent,
-                                      fontSize: 10,
-                                      fontWeight: FontWeight.bold,
+                                ),
+                              GestureDetector(
+                                onTap: _copyCode,
+                                child: Row(
+                                  children: [
+                                    Text(
+                                      widget.party["id"],
+                                      style: const TextStyle(
+                                        fontSize: 24,
+                                        fontWeight: FontWeight.w800,
+                                        letterSpacing: 1.5,
+                                        color: Colors.white,
+                                      ),
                                     ),
-                                  ),
-                                ],
+                                    const SizedBox(width: 8),
+                                    Icon(
+                                      FontAwesomeIcons.copy,
+                                      size: 14,
+                                      color: Colors.white.withValues(
+                                        alpha: 0.5,
+                                      ),
+                                    ),
+                                  ],
+                                ),
                               ),
-                            ),
-                          GestureDetector(
-                            onTap: _copyCode,
-                            child: Row(
-                              children: [
-                                Text(
-                                  widget.party["id"],
-                                  style: const TextStyle(
-                                    fontSize: 24,
-                                    fontWeight: FontWeight.w800,
-                                    letterSpacing: 1.5,
-                                    color: Colors.white,
+                              GestureDetector(
+                                onTap: _showMembersList,
+                                child: Padding(
+                                  padding: const EdgeInsets.only(top: 4),
+                                  child: Row(
+                                    children: [
+                                      Icon(
+                                        FontAwesomeIcons.users,
+                                        size: 12,
+                                        color: Theme.of(context).primaryColor,
+                                      ),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        "$partySize active",
+                                        style: TextStyle(
+                                          color: Theme.of(context).primaryColor,
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                    ],
                                   ),
+                                ),
+                              ),
+                            ],
+                          ),
+
+                          // Actions
+                          Row(
+                            children: [
+                              _HeaderIconButton(
+                                icon: FontAwesomeIcons.shareFromSquare,
+                                onTap: _shareParty,
+                              ),
+                              const SizedBox(width: 8),
+                              if (isHost) ...[
+                                _HeaderIconButton(
+                                  icon: FontAwesomeIcons.gear,
+                                  onTap: _showSettings,
                                 ),
                                 const SizedBox(width: 8),
-                                Icon(
-                                  Icons.copy_rounded,
-                                  size: 14,
-                                  color: Colors.white.withValues(alpha:0.5),
+                                _HeaderIconButton(
+                                  icon: FontAwesomeIcons.qrcode,
+                                  onTap: _showQRCode,
                                 ),
+                                const SizedBox(width: 8),
+                                _HeaderIconButton(
+                                  icon: FontAwesomeIcons.powerOff,
+                                  onTap: _endParty,
+                                  color: Colors.redAccent,
+                                ),
+                              ] else ...[
+                                _HeaderIconButton(
+                                  icon: FontAwesomeIcons.qrcode,
+                                  onTap: _showQRCode,
+                                ),
+                                const SizedBox(width: 8),
+                                _HeaderIconButton(
+                                  icon: FontAwesomeIcons.rightFromBracket,
+                                  onTap: _leaveParty,
+                                  color: Colors.redAccent,
+                                ),
+                              ],
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    // ---- PLAYER & CONTROLS ----
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: PartyPlayer(
+                        key: _playerKey,
+                        partyId: widget.party['id'],
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    _buildReactions(),
+                    const SizedBox(height: 12),
+
+                    // ---- TAB CONTENT ----
+                    Expanded(
+                      child: IndexedStack(
+                        index: _selectedIndex,
+                        children: [
+                          // 1. QUEUE
+                          _KeepAliveWrapper(
+                            child: Column(
+                              children: [
+                                Expanded(
+                                  child: PartyQueue(
+                                    partyId: widget.party['id'],
+                                  ),
+                                ),
+                                _buildSearchBar(),
                               ],
                             ),
                           ),
-                          GestureDetector(
-                            onTap: _showMembersList,
-                            child: Padding(
-                              padding: const EdgeInsets.only(top: 4),
-                              child: Row(
-                                children: [
-                                  Icon(
-                                    Icons.people_alt_rounded,
-                                    size: 12,
-                                    color: Theme.of(context).primaryColor,
-                                  ),
-                                  const SizedBox(width: 4),
-                                  Text(
-                                    "$partySize active",
-                                    style: TextStyle(
-                                      color: Theme.of(context).primaryColor,
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                                ],
-                              ),
+
+                          // 2. LYRICS
+                          const _KeepAliveWrapper(child: PartyLyrics()),
+
+                          // 3. CHAT
+                          _KeepAliveWrapper(
+                            child: PartyChat(
+                              partyId: widget.party['id'],
+                              username: widget.username,
                             ),
                           ),
                         ],
                       ),
+                    ),
 
-                      // Actions
-                      Row(
-                        children: [
-                          _HeaderIconButton(
-                            icon: Icons.share_rounded,
-                            onTap: _shareParty,
+                    // ---- CUSTOM BOTTOM NAVIGATION ----
+                    if (!isKeyboardOpen)
+                      Container(
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.2),
+                          border: Border(
+                            top: BorderSide(
+                              color: Colors.white.withValues(alpha: 0.05),
+                              width: 1,
+                            ),
                           ),
-                          const SizedBox(width: 8),
-                          if (isHost) ...[
-                            _HeaderIconButton(
-                              icon: Icons.palette_rounded,
-                              onTap: _changeTheme,
-                            ),
-                            const SizedBox(width: 8),
-                            _HeaderIconButton(
-                              icon: Icons.qr_code_rounded,
-                              onTap: _showQRCode,
-                            ),
-                            const SizedBox(width: 8),
-                          ],
-                          _RoleChip(isHost: isHost),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-
-                // ---- PLAYER & CONTROLS ----
-                AnimatedSize(
-                  duration: const Duration(milliseconds: 250),
-                  curve: Curves.easeOutCubic,
-                  child: SizedBox(
-                    height: isKeyboardOpen ? 0 : null,
-                    child: Column(
-                      children: [
-                        Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 16),
-                          child: PartyPlayer(partyId: widget.party['id']),
                         ),
-                        const SizedBox(height: 10),
-                        _buildReactions(),
-                        const SizedBox(height: 10),
-                        PartyControls(
-                          partyId: widget.party['id'],
-                          onLeave: _leaveParty,
-                        ),
-                        const SizedBox(height: 12),
-                      ],
-                    ),
-                  ),
-                ),
-
-                // ---- TABS ----
-                TabBar(
-                  controller: _tabController,
-                  indicatorSize: TabBarIndicatorSize.label,
-                  indicatorColor: Theme.of(context).primaryColor,
-                  labelColor: Colors.white,
-                  unselectedLabelColor: Colors.white.withValues(alpha:0.45),
-                  indicatorWeight: 3,
-                  dividerColor: Colors.transparent,
-                  labelStyle: const TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 13,
-                    letterSpacing: 0.5,
-                  ),
-                  tabs: [
-                    const Tab(text: "QUEUE"),
-                    const Tab(text: "LYRICS"),
-                    Tab(
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          const Text("CHAT"),
-                          if (_unreadMessages > 0) ...[
-                            const SizedBox(width: 6),
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 6,
-                                vertical: 2,
-                              ),
-                              decoration: BoxDecoration(
-                                color: Theme.of(context).primaryColor,
-                                borderRadius: BorderRadius.circular(10),
-                              ),
-                              child: Text(
-                                _unreadMessages > 9 ? "9+" : "$_unreadMessages",
-                                style: const TextStyle(
-                                  fontSize: 10,
-                                  color: Colors.black,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceAround,
+                          children: [
+                            _buildBottomNavItem(
+                              0,
+                              FontAwesomeIcons.list,
+                              "Queue",
+                            ),
+                            _buildBottomNavItem(
+                              1,
+                              FontAwesomeIcons.music,
+                              "Lyrics",
+                            ),
+                            _buildBottomNavItem(
+                              2,
+                              FontAwesomeIcons.solidComment,
+                              "Chat",
+                              hasBadge: true,
                             ),
                           ],
-                        ],
+                        ),
                       ),
-                    ),
                   ],
                 ),
-
-                const SizedBox(height: 6),
-
-                // ---- TAB CONTENT ----
-                Expanded(
-                  child: TabBarView(
-                    controller: _tabController,
-                    children: [
-                      // 1. QUEUE
-                      _KeepAliveWrapper(
-                        child: Column(
-                          children: [
-                            Expanded(
-                              child: PartyQueue(partyId: widget.party['id']),
-                            ),
-                            _buildSearchBar(),
-                          ],
-                        ),
-                      ),
-                      
-                      // 2. LYRICS
-                      const _KeepAliveWrapper(
-                        child: PartyLyrics(),
-                      ),
-
-                      // 3. CHAT
-                      _KeepAliveWrapper(
-                        child: PartyChat(
-                          partyId: widget.party['id'],
-                          username: widget.username,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
+              ),
             ),
           ),
         ),
-      ),
       ),
     );
   }
@@ -910,8 +1304,13 @@ class _KeepAliveWrapperState extends State<_KeepAliveWrapper>
 class _HeaderIconButton extends StatelessWidget {
   final IconData icon;
   final VoidCallback onTap;
+  final Color? color;
 
-  const _HeaderIconButton({required this.icon, required this.onTap});
+  const _HeaderIconButton({
+    required this.icon,
+    required this.onTap,
+    this.color,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -921,35 +1320,150 @@ class _HeaderIconButton extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.all(10),
         decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha:0.08),
+          color: Colors.white.withValues(alpha: 0.08),
           borderRadius: BorderRadius.circular(12),
         ),
-        child: Icon(icon, size: 20, color: Colors.white),
+        child: Icon(icon, size: 20, color: color ?? Colors.white),
       ),
     );
   }
 }
 
-class _RoleChip extends StatelessWidget {
-  final bool isHost;
+class _PresetCard extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final Color color;
+  final VoidCallback onTap;
 
-  const _RoleChip({required this.isHost});
+  const _PresetCard({
+    required this.icon,
+    required this.label,
+    required this.color,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(
-        color: isHost ? const Color(0xFF6C63FF) : const Color(0xFF00D2FF),
-        borderRadius: BorderRadius.circular(12),
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 16),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: color.withValues(alpha: 0.3)),
+        ),
+        child: Column(
+          children: [
+            Icon(icon, color: color, size: 28),
+            const SizedBox(height: 8),
+            Text(
+              label,
+              style: TextStyle(
+                color: color,
+                fontWeight: FontWeight.bold,
+                fontSize: 12,
+              ),
+            ),
+          ],
+        ),
       ),
-      child: Text(
-        isHost ? "HOST" : "GUEST",
-        style: const TextStyle(
-          color: Colors.white,
-          fontWeight: FontWeight.bold,
-          fontSize: 10,
-          letterSpacing: 0.5,
+    );
+  }
+}
+
+class _SwitchTile extends StatelessWidget {
+  final String label;
+  final String subtitle;
+  final bool value;
+  final ValueChanged<bool> onChanged;
+
+  const _SwitchTile({
+    required this.label,
+    required this.subtitle,
+    required this.value,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  subtitle,
+                  style: const TextStyle(color: Colors.white54, fontSize: 12),
+                ),
+              ],
+            ),
+          ),
+          Switch(
+            value: value,
+            onChanged: onChanged,
+            activeColor: Theme.of(context).primaryColor,
+            activeTrackColor: Theme.of(
+              context,
+            ).primaryColor.withValues(alpha: 0.3),
+            inactiveThumbColor: Colors.grey,
+            inactiveTrackColor: Colors.grey.withValues(alpha: 0.2),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ActionChip extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+  final Color? color;
+
+  const _ActionChip({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+    this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(20),
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: (color ?? Colors.white).withValues(
+            alpha: color == null ? 0.08 : 1,
+          ),
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 18, color: Colors.white),
+            const SizedBox(width: 6),
+            Text(
+              label,
+              style: const TextStyle(fontSize: 14, color: Colors.white),
+            ),
+          ],
         ),
       ),
     );

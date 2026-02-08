@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 
 class NeonEmptyState extends StatelessWidget {
   final bool isEndOfQueue;
@@ -25,8 +26,8 @@ class NeonEmptyState extends StatelessWidget {
               ],
             ),
             child: Icon(
-              Icons.graphic_eq_rounded,
-              size: 42,
+              FontAwesomeIcons.music,
+              size: 32,
               color: Theme.of(context).colorScheme.primary.withValues(alpha:0.85),
             ),
           ),

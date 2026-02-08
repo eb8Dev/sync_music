@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:sync_music/providers/socket_provider.dart';
 import 'package:sync_music/providers/user_provider.dart';
 import 'package:sync_music/widgets/custom_button.dart';
 import 'package:sync_music/widgets/glass_card.dart';
+import 'package:sync_music/widgets/custom_snackbar.dart';
 
 class SupportScreen extends ConsumerStatefulWidget {
   const SupportScreen({super.key});
@@ -11,6 +13,7 @@ class SupportScreen extends ConsumerStatefulWidget {
   @override
   ConsumerState<SupportScreen> createState() => _SupportScreenState();
 }
+
 
 class _SupportScreenState extends ConsumerState<SupportScreen> {
   final _formKey = GlobalKey<FormState>();
@@ -51,24 +54,14 @@ class _SupportScreenState extends ConsumerState<SupportScreen> {
   void _onSuccess(data) {
     if (!mounted) return;
     setState(() => _isSubmitting = false);
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(data['message'] ?? "Ticket submitted!"),
-        backgroundColor: Colors.green,
-      ),
-    );
+    CustomSnackbar.show(context, data['message'] ?? "Ticket submitted!");
     Navigator.pop(context); // Close screen
   }
 
   void _onError(msg) {
     if (!mounted) return;
     setState(() => _isSubmitting = false);
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(msg.toString()),
-        backgroundColor: Colors.red,
-      ),
-    );
+    CustomSnackbar.show(context, msg.toString(), isError: true);
   }
 
   void _submit() {
@@ -96,11 +89,10 @@ class _SupportScreenState extends ConsumerState<SupportScreen> {
     Future.delayed(const Duration(seconds: 10), () {
         if (mounted && _isSubmitting) {
             setState(() => _isSubmitting = false);
-             ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text("Request timed out. Check connection."),
-                backgroundColor: Colors.orange,
-              ),
+             CustomSnackbar.show(
+              context,
+              "Request timed out. Check connection.",
+              isError: true,
             );
         }
     });
@@ -161,7 +153,7 @@ class _SupportScreenState extends ConsumerState<SupportScreen> {
                         child: DropdownButton<String>(
                           value: _category,
                           dropdownColor: const Color(0xFF151922),
-                          icon: const Icon(Icons.arrow_drop_down, color: Colors.white),
+                          icon: const Icon(FontAwesomeIcons.caretDown, color: Colors.white, size: 16),
                           isExpanded: true,
                           style: const TextStyle(color: Colors.white, fontSize: 16),
                           items: _categories.map((String value) {
@@ -185,7 +177,7 @@ class _SupportScreenState extends ConsumerState<SupportScreen> {
                   _buildTextField(
                     controller: _subjectCtrl,
                     label: "Subject",
-                    icon: Icons.title,
+                    icon: FontAwesomeIcons.heading,
                     validator: (v) => v!.isEmpty ? "Please enter a subject" : null,
                   ),
                   const SizedBox(height: 16),
@@ -194,7 +186,7 @@ class _SupportScreenState extends ConsumerState<SupportScreen> {
                   _buildTextField(
                     controller: _messageCtrl,
                     label: "Message",
-                    icon: Icons.message,
+                    icon: FontAwesomeIcons.solidMessage,
                     maxLines: 6,
                     validator: (v) => v!.isEmpty ? "Please enter your message" : null,
                   ),
@@ -206,7 +198,7 @@ class _SupportScreenState extends ConsumerState<SupportScreen> {
                   else
                     CustomButton(
                       label: "Submit Ticket",
-                      icon: Icons.send_rounded,
+                      icon: FontAwesomeIcons.paperPlane,
                       onPressed: _submit,
                     ),
                 ],

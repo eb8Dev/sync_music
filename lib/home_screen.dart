@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:app_links/app_links.dart';
 import 'package:sync_music/providers/party_provider.dart';
 import 'package:sync_music/providers/socket_provider.dart';
@@ -136,128 +137,169 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   }
 
   void _showProfileEditor({VoidCallback? onSave}) {
-    final tempNameCtrl = TextEditingController(text: nameCtrl.text);
+    final userState = ref.read(userProvider);
+    final tempNameCtrl = TextEditingController(text: userState.username);
+    
+    // Find index of current avatar
+    int initialIndex = avatars.indexOf(userState.avatar);
+    if (initialIndex == -1) initialIndex = 0;
+    
+    final FixedExtentScrollController wheelController = FixedExtentScrollController(
+      initialItem: initialIndex,
+    );
 
     showModalBottomSheet(
       context: context,
       backgroundColor: const Color(0xFF151922),
       isScrollControlled: true,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       builder: (context) {
-        return Padding(
-          padding: EdgeInsets.only(
-            bottom: MediaQuery.of(context).viewInsets.bottom,
-            left: 24,
-            right: 24,
-            top: 24,
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              const Text(
-                "SETUP PROFILE",
-                style: TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
-                  letterSpacing: 1.2,
+        return StatefulBuilder(
+          builder: (context, setState) {
+            return SafeArea(
+              child: Padding(
+                padding: EdgeInsets.only(
+                  bottom: MediaQuery.of(context).viewInsets.bottom + 24,
+                  left: 24,
+                  right: 24,
+                  top: 24,
                 ),
-              ),
-              const SizedBox(height: 24),
-
-              // Avatar Selector
-              Center(
-                child: GestureDetector(
-                  onTap: () {
-                    Navigator.pop(context); // Close this sheet first
-                    _showAvatarPicker(); // Then open avatar picker
-                    // Note: This flow is a bit clunky, ideally we'd nest them or return a value
-                    // But for now, let's keep it simple.
-                    // Better UX: Show avatar grid IN here or make avatar picker return value.
-                    // Let's rely on _showAvatarPicker updating the provider directly for now.
-                  },
-                  child: Consumer(
-                    builder: (context, ref, _) {
-                      final avatar = ref.watch(userProvider).avatar;
-                      return Container(
-                        width: 80,
-                        height: 80,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    const Text(
+                      "EDIT PROFILE",
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 1.2,
+                        fontSize: 12,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 32),
+              
+                    // ---- HORIZONTAL SPIN WHEEL AVATAR SELECTOR ----
+                    SizedBox(
+                      height: 120,
+                      child: Stack(
                         alignment: Alignment.center,
-                        decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.1),
-                          shape: BoxShape.circle,
-                          border: Border.all(
-                            color: Theme.of(context).primaryColor,
+                        children: [
+                          // Selection Indicator (Glow)
+                          Container(
+                            width: 80,
+                            height: 80,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: Theme.of(context).primaryColor.withValues(alpha: 0.15),
+                              border: Border.all(
+                                color: Theme.of(context).primaryColor.withValues(alpha: 0.5),
+                                width: 2,
+                              ),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Theme.of(context).primaryColor.withValues(alpha: 0.2),
+                                  blurRadius: 20,
+                                  spreadRadius: 2,
+                                ),
+                              ],
+                            ),
                           ),
+              
+                          // The Wheel
+                          RotatedBox(
+                            quarterTurns: -1,
+                            child: ListWheelScrollView.useDelegate(
+                              controller: wheelController,
+                              itemExtent: 80,
+                              physics: const FixedExtentScrollPhysics(),
+                              diameterRatio: 1.5,
+                              perspective: 0.005,
+                              onSelectedItemChanged: (index) {
+                                HapticFeedback.selectionClick();
+                              },
+                              childDelegate: ListWheelChildBuilderDelegate(
+                                childCount: avatars.length,
+                                builder: (context, index) {
+                                  return RotatedBox(
+                                    quarterTurns: 1,
+                                    child: Center(
+                                      child: Text(
+                                        avatars[index],
+                                        style: const TextStyle(fontSize: 44),
+                                      ),
+                                    ),
+                                  );
+                                },
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    const Text(
+                      "Swipe to change avatar",
+                      style: TextStyle(color: Colors.white38, fontSize: 11),
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 32),
+              
+                    // Name Input
+                    TextField(
+                      controller: tempNameCtrl,
+                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                      textAlign: TextAlign.center,
+                      decoration: InputDecoration(
+                        hintText: "Your Name",
+                        hintStyle: const TextStyle(color: Colors.white24),
+                        filled: true,
+                        fillColor: Colors.white.withValues(alpha: 0.05),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(16),
+                          borderSide: BorderSide.none,
                         ),
-                        child: Text(
-                          avatar,
-                          style: const TextStyle(fontSize: 40),
+                        contentPadding: const EdgeInsets.symmetric(vertical: 18),
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+              
+                    ElevatedButton(
+                      onPressed: () {
+                        final name = tempNameCtrl.text.trim();
+                        if (name.isEmpty) return;
+              
+                        final selectedAvatarIndex = wheelController.selectedItem;
+                        final avatar = avatars[selectedAvatarIndex];
+              
+                        ref.read(userProvider.notifier).saveUser(name, avatar);
+                        
+                        Navigator.pop(context);
+                        onSave?.call();
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Theme.of(context).primaryColor,
+                        foregroundColor: Colors.black,
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16),
                         ),
-                      );
-                    },
-                  ),
+                        elevation: 0,
+                      ),
+                      child: const Text(
+                        "SAVE CHANGES",
+                        style: TextStyle(fontWeight: FontWeight.w900, letterSpacing: 1),
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                  ],
                 ),
               ),
-              const SizedBox(height: 16),
-              const Center(
-                child: Text(
-                  "Tap to change avatar",
-                  style: TextStyle(color: Colors.white54, fontSize: 12),
-                ),
-              ),
-              const SizedBox(height: 24),
-
-              // Name Input
-              TextField(
-                controller: tempNameCtrl,
-                style: const TextStyle(color: Colors.white),
-                decoration: InputDecoration(
-                  labelText: "Display Name",
-                  labelStyle: const TextStyle(color: Colors.white70),
-                  filled: true,
-                  fillColor: Colors.white.withValues(alpha: 0.05),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 32),
-
-              ElevatedButton(
-                onPressed: () {
-                  if (tempNameCtrl.text.trim().isEmpty) return;
-
-                  setState(() {
-                    nameCtrl.text = tempNameCtrl.text.trim();
-                  });
-
-                  final avatar = ref.read(userProvider).avatar;
-                  ref
-                      .read(userProvider.notifier)
-                      .saveUser(nameCtrl.text, avatar);
-
-                  Navigator.pop(context);
-                  onSave?.call();
-                },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Theme.of(context).primaryColor,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                ),
-                child: const Text(
-                  "Save & Continue",
-                  style: TextStyle(fontWeight: FontWeight.bold),
-                ),
-              ),
-              const SizedBox(height: 24),
-            ],
-          ),
+            );
+          },
         );
       },
     );
@@ -343,9 +385,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                             ),
                           ),
                           child: const Icon(
-                            Icons.rocket_launch_rounded,
+                            FontAwesomeIcons.rocket,
                             color: Colors.white,
-                            size: 24,
+                            size: 20,
                           ),
                         ),
                         const SizedBox(width: 16),
@@ -405,7 +447,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                             context,
                             title: "Music",
                             subtitle: "Standard Party",
-                            icon: Icons.music_note,
+                            icon: FontAwesomeIcons.music,
                             isSelected: mode == 'party',
                             onTap: () => setState(() => mode = 'party'),
                           ),
@@ -416,7 +458,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                             context,
                             title: "Movie",
                             subtitle: "Watch Together",
-                            icon: Icons.movie_filter_rounded,
+                            icon: FontAwesomeIcons.clapperboard,
                             isSelected: mode == 'movie',
                             onTap: () => setState(() => mode = 'movie'),
                           ),
@@ -443,7 +485,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                             context,
                             title: "Private",
                             subtitle: "Invite only",
-                            icon: Icons.lock_outline,
+                            icon: FontAwesomeIcons.lock,
                             isSelected: !isPublic,
                             onTap: () => setState(() => isPublic = false),
                           ),
@@ -454,7 +496,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                             context,
                             title: "Public",
                             subtitle: "Anyone can join",
-                            icon: Icons.public,
+                            icon: FontAwesomeIcons.earthAmericas,
                             isSelected: isPublic,
                             onTap: () => setState(() => isPublic = true),
                           ),
@@ -602,88 +644,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     }
   }
 
-  void _showAvatarPicker() {
-    final currentAvatar = ref.read(userProvider).avatar;
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: const Color(0xFF151922),
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (context) {
-        return DraggableScrollableSheet(
-          expand: false,
-          initialChildSize: 0.5,
-          minChildSize: 0.35,
-          maxChildSize: 0.85,
-          builder: (context, scrollController) {
-            return Padding(
-              padding: const EdgeInsets.all(24),
-              child: Column(
-                children: [
-                  const Text(
-                    "CHOOSE AVATAR",
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                      letterSpacing: 1.2,
-                    ),
-                  ),
-                  const SizedBox(height: 24),
-                  Expanded(
-                    child: GridView.builder(
-                      controller: scrollController,
-                      gridDelegate:
-                          const SliverGridDelegateWithFixedCrossAxisCount(
-                            crossAxisCount: 4,
-                            mainAxisSpacing: 16,
-                            crossAxisSpacing: 16,
-                          ),
-                      itemCount: avatars.length,
-                      itemBuilder: (context, index) {
-                        final avatar = avatars[index];
-                        final isSelected = avatar == currentAvatar;
-                        return GestureDetector(
-                          onTap: () {
-                            ref
-                                .read(userProvider.notifier)
-                                .saveUser(nameCtrl.text.trim(), avatar);
-                            Navigator.pop(context);
-                          },
-                          child: Container(
-                            decoration: BoxDecoration(
-                              color: isSelected
-                                  ? Theme.of(
-                                      context,
-                                    ).primaryColor.withValues(alpha: 0.2)
-                                  : Colors.white.withValues(alpha: 0.05),
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(
-                                color: isSelected
-                                    ? Theme.of(context).primaryColor
-                                    : Colors.transparent,
-                              ),
-                            ),
-                            alignment: Alignment.center,
-                            child: Text(
-                              avatar,
-                              style: const TextStyle(fontSize: 24),
-                            ),
-                          ),
-                        );
-                      },
-                    ),
-                  ),
-                ],
-              ),
-            );
-          },
-        );
-      },
-    );
-  }
-
   @override
   void dispose() {
     _linkSubscription?.cancel();
@@ -789,7 +749,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         ),
         actions: [
           IconButton(
-            icon: const Icon(Icons.settings_outlined, color: Colors.white),
+            icon: const Icon(FontAwesomeIcons.gear, color: Colors.white, size: 20),
             onPressed: () => Navigator.push(
               context,
               MaterialPageRoute(builder: (_) => const SettingsScreen()),
@@ -854,7 +814,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                         context,
                         title: "Explore",
                         subtitle: "Public Parties",
-                        icon: Icons.explore,
+                        icon: FontAwesomeIcons.compass,
                         color: const Color(0xFF00D2FF),
                         onTap: () {
                           if (!_ensureNameSet(() {
@@ -883,7 +843,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                         context,
                         title: "Scan QR",
                         subtitle: "Join Quickly",
-                        icon: Icons.qr_code_scanner,
+                        icon: FontAwesomeIcons.qrcode,
                         color: const Color(0xFFFF2E63),
                         onTap: _scanQR,
                       ),
@@ -947,9 +907,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                             Row(
                               children: [
                                 Icon(
-                                  Icons.queue_music_rounded,
+                                  FontAwesomeIcons.list,
                                   color: primary,
-                                  size: 26,
+                                  size: 20,
                                 ),
                                 const SizedBox(width: 12),
                                 const Text(
@@ -963,8 +923,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                                 ),
                                 const Spacer(),
                                 Icon(
-                                  Icons.arrow_forward_rounded,
+                                  FontAwesomeIcons.arrowRight,
                                   color: Colors.white.withValues(alpha: 0.4),
+                                  size: 18,
                                 ),
                               ],
                             ),
@@ -1092,7 +1053,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               foregroundColor: Colors.black,
               padding: const EdgeInsets.all(12),
             ),
-            icon: const Icon(Icons.arrow_forward_rounded),
+            icon: const Icon(FontAwesomeIcons.arrowRight, size: 18),
           ),
         ],
       ),

@@ -5,9 +5,11 @@ import 'package:socket_io_client/socket_io_client.dart' as IO;
 import 'package:sync_music/providers/socket_provider.dart';
 
 class DetailedPartyState {
+  final String? partyId;
   final List<dynamic> queue;
   final List<Map<String, dynamic>> messages;
   final List<Map<String, dynamic>> members;
+  final Map<String, bool> settings; // New field
   final int currentIndex;
   final bool isPlaying;
   final int? startedAt;
@@ -19,9 +21,15 @@ class DetailedPartyState {
   final int? countdown;
 
   const DetailedPartyState({
+    this.partyId,
     this.queue = const [],
     this.messages = const [],
     this.members = const [],
+    this.settings = const {
+      "guestControls": false,
+      "guestQueueing": true,
+      "voteSkip": true,
+    },
     this.currentIndex = 0,
     this.isPlaying = false,
     this.startedAt,
@@ -34,9 +42,11 @@ class DetailedPartyState {
   });
 
   DetailedPartyState copyWith({
+    String? partyId,
     List<dynamic>? queue,
     List<Map<String, dynamic>>? messages,
     List<Map<String, dynamic>>? members,
+    Map<String, bool>? settings,
     int? currentIndex,
     bool? isPlaying,
     int? startedAt,
@@ -49,9 +59,11 @@ class DetailedPartyState {
     bool clearCountdown = false,
   }) {
     return DetailedPartyState(
+      partyId: partyId ?? this.partyId,
       queue: queue ?? this.queue,
       messages: messages ?? this.messages,
       members: members ?? this.members,
+      settings: settings ?? this.settings,
       currentIndex: currentIndex ?? this.currentIndex,
       isPlaying: isPlaying ?? this.isPlaying,
       startedAt: startedAt ?? this.startedAt,
@@ -67,6 +79,7 @@ class DetailedPartyState {
 
 class PartyScreenNotifier extends Notifier<DetailedPartyState> {
   late IO.Socket _socket;
+  int _timeOffset = 0; // ClientTime - ServerTime
 
   @override
   DetailedPartyState build() {
@@ -76,15 +89,54 @@ class PartyScreenNotifier extends Notifier<DetailedPartyState> {
     return const DetailedPartyState();
   }
 
+  int? _getAdjustedStartedAt(int? serverStartedAt, int? serverTime) {
+    if (serverStartedAt == null) return null;
+    
+    // Update offset if serverTime is provided
+    if (serverTime != null) {
+      final now = DateTime.now().millisecondsSinceEpoch;
+      _timeOffset = now - serverTime;
+    }
+    
+    // Apply offset: startedAtLocal = startedAtServer + (Client - Server)
+    return serverStartedAt + _timeOffset;
+  }
+
   void init(Map<String, dynamic> initialData) {
     _cleanupListeners(); // Remove any existing listeners first
+    
+    // Parse settings safely
+    Map<String, bool> parsedSettings = {
+      "guestControls": false,
+      "guestQueueing": true,
+      "voteSkip": true,
+    };
+    
+    if (initialData["settings"] != null) {
+      try {
+        final raw = initialData["settings"] as Map;
+        parsedSettings = {
+           "guestControls": raw["guestControls"] == true,
+           "guestQueueing": raw["guestQueueing"] == true,
+           "voteSkip": raw["voteSkip"] == true,
+        };
+      } catch (e) {
+        debugPrint("Error parsing settings: $e");
+      }
+    }
+
+    final serverTime = (initialData["serverTime"] as num?)?.toInt();
+    final serverStartedAt = (initialData["startedAt"] as num?)?.toInt();
+
     state = DetailedPartyState(
+      partyId: initialData["id"],
       queue: List.from(initialData["queue"] ?? []),
       currentIndex: initialData["currentIndex"] ?? 0,
       isPlaying: initialData["isPlaying"] == true,
-      startedAt: (initialData["startedAt"] as num?)?.toInt(),
+      startedAt: _getAdjustedStartedAt(serverStartedAt, serverTime),
       partySize: initialData["size"] ?? 1,
       themeIndex: initialData["themeIndex"] ?? 0,
+      settings: parsedSettings,
       members: initialData["members"] != null 
           ? List<Map<String, dynamic>>.from(initialData["members"]) 
           : const [],
@@ -103,6 +155,7 @@ class PartyScreenNotifier extends Notifier<DetailedPartyState> {
     _socket.off("MEMBERS_LIST", _onMembersList);
     _socket.off("THEME_UPDATE", _onThemeUpdate);
     _socket.off("HOST_UPDATE", _onHostUpdate);
+    _socket.off("SETTINGS_UPDATE", _onSettingsUpdate);
     // Note: Disconnect/Connect handlers are tricky with Socket.IO client dart 
     // as it doesn't support named handler removal for built-in events easily
     // without exact reference, but our main issue is custom events.
@@ -120,6 +173,7 @@ class PartyScreenNotifier extends Notifier<DetailedPartyState> {
     _socket.on("MEMBERS_LIST", _onMembersList);
     _socket.on("THEME_UPDATE", _onThemeUpdate);
     _socket.on("HOST_UPDATE", _onHostUpdate);
+    _socket.on("SETTINGS_UPDATE", _onSettingsUpdate);
 
     // Prevent duplicate connection listeners by checking (if possible) or just accepting
     // that these simple bool toggles are less harmful if duplicated.
@@ -139,18 +193,36 @@ class PartyScreenNotifier extends Notifier<DetailedPartyState> {
   }
 
   void _onPlaybackUpdate(data) {
+    final serverTime = (data["serverTime"] as num?)?.toInt();
+    final serverStartedAt = (data["startedAt"] as num?)?.toInt();
+
     state = state.copyWith(
       isPlaying: data["isPlaying"] == true,
       currentIndex: data["currentIndex"] ?? state.currentIndex,
-      startedAt: (data["startedAt"] as num?)?.toInt(),
+      startedAt: _getAdjustedStartedAt(serverStartedAt, serverTime),
     );
   }
 
   void _onSync(data) {
-     if (data["currentIndex"] != state.currentIndex) {
+     final serverTime = (data["serverTime"] as num?)?.toInt();
+     final serverStartedAt = (data["startedAt"] as num?)?.toInt();
+     final adjustedStartedAt = _getAdjustedStartedAt(serverStartedAt, serverTime);
+
+     // Update even if index didn't change, to correct drift
+     // We check if startedAt has drifted by > 100ms
+     bool startedAtChanged = false;
+     if (adjustedStartedAt != null) {
+        if (state.startedAt == null) {
+           startedAtChanged = true;
+        } else {
+           startedAtChanged = (state.startedAt! - adjustedStartedAt).abs() > 100;
+        }
+     }
+
+     if (data["currentIndex"] != state.currentIndex || startedAtChanged) {
         state = state.copyWith(
           currentIndex: data["currentIndex"],
-          startedAt: (data["startedAt"] as num?)?.toInt(),
+          startedAt: adjustedStartedAt ?? state.startedAt,
         );
      }
   }
@@ -179,8 +251,51 @@ class PartyScreenNotifier extends Notifier<DetailedPartyState> {
        return; 
     }
 
+    // ---- Chat Commands (Host Only Bot Logic) ----
+    if (text != null && text.startsWith("!") && state.partyId != null) {
+      final senderId = data['senderId'];
+      final isSenderHost = state.members.firstWhere(
+            (m) => m['id'] == senderId,
+            orElse: () => {'isHost': false},
+          )['isHost'] == true;
+
+      // Allow if Sender is Host OR Guest Controls are enabled
+      final canControl = isSenderHost || (state.settings["guestControls"] == true);
+
+      if (canControl && _amIHost()) {
+         // I am the host instance, so I execute the actual socket emit on behalf of the user's command
+         // (This ensures only one client sends the command to server)
+        final command = text.trim().toLowerCase();
+        if (command == "!play") {
+          play(state.partyId!);
+        } else if (command == "!pause") {
+          pause(state.partyId!);
+        } else if (command == "!next") {
+          if (state.currentIndex < state.queue.length - 1) {
+             changeTrack(state.partyId!, state.currentIndex + 1);
+          }
+        } else if (command == "!prev") {
+           if (state.currentIndex > 0) {
+             changeTrack(state.partyId!, state.currentIndex - 1);
+           }
+        }
+      }
+    }
+
     final msg = {...Map<String, dynamic>.from(data), 'type': 'user'};
     state = state.copyWith(messages: [...state.messages, msg]);
+  }
+
+  bool _amIHost() {
+    final myId = _socket.id;
+    if (myId == null) return false;
+    // Check if any member with my ID is host
+    // (Assuming state.members is up to date)
+    final me = state.members.firstWhere(
+      (m) => m['id'] == myId, 
+      orElse: () => {},
+    );
+    return me['isHost'] == true;
   }
 
   void _onInfo(msg) {
@@ -206,6 +321,20 @@ class PartyScreenNotifier extends Notifier<DetailedPartyState> {
     }).toList();
     state = state.copyWith(members: updatedMembers);
     _addSystemMessage("Host has changed!");
+  }
+
+  void _onSettingsUpdate(data) {
+    try {
+      Map<String, bool> newSettings = {
+         "guestControls": data["guestControls"] == true,
+         "guestQueueing": data["guestQueueing"] == true,
+         "voteSkip": data["voteSkip"] == true,
+      };
+      state = state.copyWith(settings: newSettings);
+      _addSystemMessage("Party settings updated.");
+    } catch (e) {
+      debugPrint("Error parsing settings update: $e");
+    }
   }
 
   void _addSystemMessage(String text) {
@@ -283,6 +412,10 @@ class PartyScreenNotifier extends Notifier<DetailedPartyState> {
   void changeTheme(String partyId) {
     final nextIndex = (state.themeIndex + 1) % 5; // Assuming 5 themes
     _socket.emit("CHANGE_THEME", {"partyId": partyId, "themeIndex": nextIndex});
+  }
+  
+  void updateSettings(String partyId, Map<String, bool> newSettings) {
+    _socket.emit("UPDATE_SETTINGS", {"partyId": partyId, "settings": newSettings});
   }
 
   void kickUser(String partyId, String targetId) {

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
 class QRScannerScreen extends StatefulWidget {
@@ -123,9 +124,9 @@ class _QRScannerScreenState extends State<QRScannerScreen>
                       shape: BoxShape.circle,
                     ),
                     child: const Icon(
-                      Icons.check_rounded,
+                      FontAwesomeIcons.check,
                       color: Colors.greenAccent,
-                      size: 80,
+                      size: 60,
                     ),
                   ),
                 ),

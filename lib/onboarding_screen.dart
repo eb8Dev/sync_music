@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sync_music/home_screen.dart';
 
@@ -18,19 +19,19 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       title: "Welcome to SyncMusic",
       body:
           "Listen to music together with friends in real time, no matter where you are.",
-      icon: Icons.music_note_rounded,
+      icon: FontAwesomeIcons.music,
     ),
     _OnboardingPage(
       title: "Host the Party",
       body:
           "Create a party, manage the queue, and control playback as the DJ.",
-      icon: Icons.album_rounded,
+      icon: FontAwesomeIcons.compactDisc,
     ),
     _OnboardingPage(
       title: "Perfectly in Sync",
       body:
           "Everyone hears the same beat at the same time. No countdowns needed.",
-      icon: Icons.sync_rounded,
+      icon: FontAwesomeIcons.rotate,
     ),
   ];
 
