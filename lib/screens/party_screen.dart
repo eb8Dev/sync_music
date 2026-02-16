@@ -20,10 +20,12 @@ import 'package:wakelock_plus/wakelock_plus.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:sync_music/widgets/exit_confirmation_dialog.dart';
-import 'package:sync_music/party_ended_screen.dart';
+import 'package:sync_music/screens/party_ended_screen.dart';
 import 'package:sync_music/widgets/add_to_playlist_sheet.dart';
 import 'package:sync_music/widgets/playlist_import_sheet.dart';
-import 'package:sync_music/party_kicked_screen.dart';
+import 'package:sync_music/widgets/spotify_import_sheet.dart';
+import 'package:sync_music/screens/party_kicked_screen.dart';
+import 'package:sync_music/providers/spotify_provider.dart';
 
 class PartyScreen extends ConsumerStatefulWidget {
   final Map<String, dynamic> party;
@@ -733,6 +735,103 @@ class _PartyScreenState extends ConsumerState<PartyScreen> {
     );
   }
 
+  void _showSpotifyImport() {
+    final isSpotifyConnected = ref.read(spotifyProvider);
+    if (!isSpotifyConnected) {
+      _showSpotifyConnectDialog();
+      return;
+    }
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (context) => SpotifyImportSheet(
+        partyId: widget.party["id"],
+        username: widget.username,
+      ),
+    );
+  }
+
+  void _showSpotifyConnectDialog() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF151922),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (context) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(24.0),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: const BoxDecoration(
+                      color: Color(0xFF1DB954),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(
+                      FontAwesomeIcons.spotify,
+                      color: Colors.black,
+                      size: 20,
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+                  const Text(
+                    "Connect Spotify",
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 20),
+              const Text(
+                "Connect your Spotify account to import your Liked Songs and Playlists directly into the party.",
+                style: TextStyle(color: Colors.white70, fontSize: 14, height: 1.5),
+              ),
+              const SizedBox(height: 32),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF1DB954),
+                  foregroundColor: Colors.black,
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  elevation: 0,
+                ),
+                onPressed: () {
+                  Navigator.pop(context);
+                  ref.read(spotifyProvider.notifier).connect();
+                },
+                child: const Text(
+                  "CONNECT NOW",
+                  style: TextStyle(fontWeight: FontWeight.w900, letterSpacing: 1),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text(
+                  "Maybe Later",
+                  style: TextStyle(color: Colors.white38, fontWeight: FontWeight.bold),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   // ---- BUILD HELPERS ----
   Widget _buildSearchBar() {
     return Padding(
@@ -822,6 +921,7 @@ class _PartyScreenState extends ConsumerState<PartyScreen> {
           // ---- ACTION CHIPS ----
           Wrap(
             spacing: 8,
+            runSpacing: 8,
             children: [
               if (isPlaylistDetected)
                 _ActionChip(
@@ -834,6 +934,12 @@ class _PartyScreenState extends ConsumerState<PartyScreen> {
                 icon: FontAwesomeIcons.compactDisc,
                 label: "My playlists",
                 onTap: _showMyPlaylistsImport,
+              ),
+              _ActionChip(
+                icon: FontAwesomeIcons.spotify,
+                label: "Spotify",
+                color: const Color(0xFF1DB954),
+                onTap: _showSpotifyImport,
               ),
             ],
           ),

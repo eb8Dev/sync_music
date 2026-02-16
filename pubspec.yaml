@@ -67,6 +67,12 @@ dependencies:
   image: ^4.7.2
   path_provider: ^2.1.5
   font_awesome_flutter: ^10.12.0
+  audioplayers: ^6.5.1
+  spotify: ^0.15.0
+  flutter_web_auth_2: ^5.0.1
+  flutter_secure_storage: ^10.0.0
+  flutter_dotenv: ^6.0.0
+  oauth2: ^2.0.5
 
 dev_dependencies:
   flutter_test:
@@ -104,6 +110,8 @@ flutter:
     - assets/new_sync_music_background.png
     - assets/new_sync_music_background.png
     - assets/music_note.png
+    - assets/audio/
+    - .env
   #   - images/a_dot_ham.jpeg
 
   # An image asset can refer to one or more resolution-specific "variants", see

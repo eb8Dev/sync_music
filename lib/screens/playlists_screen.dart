@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:sync_music/models/playlist_model.dart';
-import 'package:sync_music/playlist_detail_screen.dart';
+import 'package:sync_music/screens/playlist_detail_screen.dart';
 import 'package:sync_music/providers/playlist_provider.dart';
 
 class PlaylistsScreen extends ConsumerWidget {

@@ -16,7 +16,7 @@ import 'package:sync_music/widgets/generate_party_image.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:sync_music/services/youtube_service.dart';
 import 'package:youtube_explode_dart/youtube_explode_dart.dart' as yt;
-import 'package:sync_music/party_ended_screen.dart';
+import 'package:sync_music/screens/party_ended_screen.dart';
 
 class MoviePartyScreen extends ConsumerStatefulWidget {
   final Map<String, dynamic> party;

@@ -8,13 +8,13 @@ import 'package:sync_music/providers/party_provider.dart';
 import 'package:sync_music/providers/socket_provider.dart';
 import 'package:sync_music/providers/user_provider.dart';
 import 'package:sync_music/services/notification_service.dart';
-import 'package:sync_music/waiting_screen.dart';
-import 'package:sync_music/qr_scanner_screen.dart';
+import 'package:sync_music/screens/waiting_screen.dart';
+import 'package:sync_music/screens/qr_scanner_screen.dart';
 import 'package:in_app_update/in_app_update.dart';
 import 'package:sync_music/services/analytics_service.dart';
 import 'package:sync_music/widgets/resume_party_card.dart';
-import 'package:sync_music/settings_screen.dart';
-import 'package:sync_music/explore_screen.dart';
+import 'package:sync_music/screens/settings_screen.dart';
+import 'package:sync_music/screens/explore_screen.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});

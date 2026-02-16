@@ -4,17 +4,42 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_crashlytics/firebase_crashlytics.dart';
-import 'package:sync_music/home_screen.dart';
-import 'package:sync_music/onboarding_screen.dart';
+import 'package:sync_music/screens/home_screen.dart';
+import 'package:sync_music/screens/onboarding_screen.dart';
 import 'package:sync_music/theme/app_theme.dart';
 import 'package:sync_music/services/remote_config_service.dart';
 import 'package:sync_music/services/notification_service.dart';
 import 'package:sync_music/providers/socket_provider.dart';
+import 'package:audioplayers/audioplayers.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'firebase_options.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   // await SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
+
+  try {
+    await dotenv.load(fileName: ".env");
+  } catch (e) {
+    debugPrint("Failed to load .env file: $e");
+  }
+
+  // Configure Audio Session to mix with others (prevents pausing YouTube)
+  AudioPlayer.global.setAudioContext(AudioContext(
+    android: const AudioContextAndroid(
+      isSpeakerphoneOn: false,
+      stayAwake: false,
+      contentType: AndroidContentType.sonification,
+      usageType: AndroidUsageType.assistanceSonification,
+      audioFocus: AndroidAudioFocus.none, // Key: Don't steal focus from WebView
+    ),
+    iOS: AudioContextIOS(
+      category: AVAudioSessionCategory.playback, // Use playback to allow explicit mixing options
+      options: {
+        AVAudioSessionOptions.mixWithOthers,
+      },
+    ),
+  ));
 
   try {
     await Firebase.initializeApp(
@@ -107,5 +132,5 @@ class _PartyAppState extends ConsumerState<PartyApp>
   }
 }
 
-// flutter build apk --target-platform android-arm64 --split-per-ab
+// flutter build apk --target-platform android-arm64 --split-per-abi
 // flutter build appbundle --release

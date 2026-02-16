@@ -639,6 +639,13 @@ io.on("connection", (socket) => {
         return;
     }
 
+    // Duplicate Check
+    const isDuplicate = party.queue.some(t => t.url === track.url);
+    if (isDuplicate) {
+        socket.emit("INFO", "This song is already in the queue!");
+        return;
+    }
+
     party.queue.push({
       id: uuidv4(),
       url: track.url,
@@ -793,9 +800,20 @@ io.on("connection", (socket) => {
   });
 
   // ---------------- CHAT ----------------
-  socket.on("SEND_MESSAGE", ({ partyId, message, username }) => {
+  socket.on("SEND_MESSAGE", ({ partyId, message, username, id }) => {
     if (!message || !message.trim()) return;
-    io.to(partyId).emit("CHAT_MESSAGE", { id: uuidv4(), senderId: socket.id, username, text: message.trim(), timestamp: Date.now() });
+    io.to(partyId).emit("CHAT_MESSAGE", { 
+      id: id || uuidv4(), 
+      senderId: socket.id, 
+      username, 
+      text: message.trim(), 
+      timestamp: Date.now() 
+    });
+  });
+
+  // ---------------- SYNC PING ----------------
+  socket.on("PING", (clientTime) => {
+    socket.emit("PONG", { clientTime, serverTime: Date.now() });
   });
 
   // ---------------- SUPPORT ----------------

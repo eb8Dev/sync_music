@@ -3,6 +3,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:socket_io_client/socket_io_client.dart' as IO;
 import 'package:sync_music/providers/socket_provider.dart';
+import 'package:audioplayers/audioplayers.dart';
+import 'package:uuid/uuid.dart';
 
 class DetailedPartyState {
   final String? partyId;
@@ -79,27 +81,34 @@ class DetailedPartyState {
 
 class PartyScreenNotifier extends Notifier<DetailedPartyState> {
   late IO.Socket _socket;
-  int _timeOffset = 0; // ClientTime - ServerTime
+  int _timeOffset = 0; // serverTime = localTime + _timeOffset
+  Timer? _pingTimer;
+  final AudioPlayer _audioPlayer = AudioPlayer();
 
   @override
   DetailedPartyState build() {
     _socket = ref.watch(socketProvider);
-    // Initialize with empty state.
-    // In a real app, we might want to initialize with data from partyProvider's partyData if available.
+    // Cleanup on dispose
+    ref.onDispose(() {
+      _cleanupListeners();
+      _pingTimer?.cancel();
+      _audioPlayer.dispose();
+    });
     return const DetailedPartyState();
   }
 
   int? _getAdjustedStartedAt(int? serverStartedAt, int? serverTime) {
     if (serverStartedAt == null) return null;
     
-    // Update offset if serverTime is provided
+    // Update offset if serverTime is provided from a regular event
     if (serverTime != null) {
-      final now = DateTime.now().millisecondsSinceEpoch;
-      _timeOffset = now - serverTime;
+       // Note: This is a fallback. The PING/PONG is more accurate.
+       final now = DateTime.now().millisecondsSinceEpoch;
+       _timeOffset = serverTime - now; 
     }
     
-    // Apply offset: startedAtLocal = startedAtServer + (Client - Server)
-    return serverStartedAt + _timeOffset;
+    // localStartedAt = serverStartedAt - _timeOffset
+    return serverStartedAt - _timeOffset;
   }
 
   void init(Map<String, dynamic> initialData) {
@@ -142,6 +151,35 @@ class PartyScreenNotifier extends Notifier<DetailedPartyState> {
           : const [],
     );
     _setupListeners();
+    _startPingTimer();
+  }
+
+  void _startPingTimer() {
+    _pingTimer?.cancel();
+    _sendPing();
+    _pingTimer = Timer.periodic(const Duration(seconds: 30), (_) => _sendPing());
+  }
+
+  void _sendPing() {
+    if (!_socket.connected) return;
+    final now = DateTime.now().millisecondsSinceEpoch;
+    _socket.emit("PING", now);
+  }
+
+  void _onPong(data) {
+    final clientSentTime = (data["clientTime"] as num).toInt();
+    final serverTime = (data["serverTime"] as num).toInt();
+    final now = DateTime.now().millisecondsSinceEpoch;
+    
+    final rtt = now - clientSentTime;
+    final latency = rtt ~/ 2;
+    
+    // serverTimeNow = serverTime_at_receive + latency
+    // _timeOffset = serverTimeNow - now
+    // Simplified: _timeOffset = serverTime - (now - latency)
+    _timeOffset = serverTime - (now - latency);
+    
+    debugPrint("RTT Sync: latency=${latency}ms, offset=${_timeOffset}ms");
   }
 
   void _cleanupListeners() {
@@ -156,10 +194,9 @@ class PartyScreenNotifier extends Notifier<DetailedPartyState> {
     _socket.off("THEME_UPDATE", _onThemeUpdate);
     _socket.off("HOST_UPDATE", _onHostUpdate);
     _socket.off("SETTINGS_UPDATE", _onSettingsUpdate);
-    // Note: Disconnect/Connect handlers are tricky with Socket.IO client dart 
-    // as it doesn't support named handler removal for built-in events easily
-    // without exact reference, but our main issue is custom events.
-    // For now, we leave connect/disconnect as they just update a bool flag.
+    _socket.off("PONG", _onPong);
+    _socket.off("connect");
+    _socket.off("disconnect");
   }
 
   void _setupListeners() {
@@ -174,22 +211,42 @@ class PartyScreenNotifier extends Notifier<DetailedPartyState> {
     _socket.on("THEME_UPDATE", _onThemeUpdate);
     _socket.on("HOST_UPDATE", _onHostUpdate);
     _socket.on("SETTINGS_UPDATE", _onSettingsUpdate);
+    _socket.on("PONG", _onPong);
 
-    // Prevent duplicate connection listeners by checking (if possible) or just accepting
-    // that these simple bool toggles are less harmful if duplicated.
-    _socket.onDisconnect((_) => state = state.copyWith(isDisconnected: true));
-    _socket.onConnect((_) => state = state.copyWith(isDisconnected: false));
+    _socket.on("disconnect", (_) => state = state.copyWith(isDisconnected: true));
+    _socket.on("connect", (_) {
+      state = state.copyWith(isDisconnected: false);
+      _sendPing(); // Immediate re-sync on connect
+    });
   }
 
   // ---- Handlers ----
 
   void _onQueueUpdated(data) {
-    final newQueue = List.from(data);
-    if (newQueue.length > state.queue.length) {
-       final newTrack = newQueue.last;
+    final incomingQueue = List.from(data);
+    
+    // Preserve local "pending" tracks that haven't been confirmed yet
+    final pendingTracks = state.queue.where((t) {
+      if (t is! Map) return false;
+      if (t['isPending'] != true) return false;
+      
+      // If the incoming queue already has this URL, it's confirmed
+      final isConfirmed = incomingQueue.any((it) => it['url'] == t['url']);
+      
+      // Also check for expiration (e.g., 15 seconds)
+      final addedAt = int.tryParse(t['id'].toString().split('-').last) ?? 0;
+      final isExpired = DateTime.now().millisecondsSinceEpoch - addedAt > 15000;
+      
+      return !isConfirmed && !isExpired;
+    }).toList();
+
+    if (incomingQueue.length > state.queue.length - pendingTracks.length) {
+       final newTrack = incomingQueue.last;
        _addSystemMessage("${newTrack['addedBy'] ?? 'Someone'} added '${newTrack['title']}'");
     }
-    state = state.copyWith(queue: newQueue);
+    
+    // Combine incoming queue with remaining pending tracks
+    state = state.copyWith(queue: [...incomingQueue, ...pendingTracks]);
   }
 
   void _onPlaybackUpdate(data) {
@@ -241,6 +298,12 @@ class PartyScreenNotifier extends Notifier<DetailedPartyState> {
   void _onChatMessage(data) {
     debugPrint("Chat message received: $data");
     final text = (data['message'] ?? data['text']) as String?;
+    final incomingId = data['id'];
+
+    // Avoid duplicate from server if we already added it optimistically
+    if (incomingId != null && state.messages.any((m) => m['id'] == incomingId)) {
+       return;
+    }
     
     if (text == "##COUNTDOWN##") {
        debugPrint("Countdown signal received!");
@@ -284,6 +347,18 @@ class PartyScreenNotifier extends Notifier<DetailedPartyState> {
 
     final msg = {...Map<String, dynamic>.from(data), 'type': 'user'};
     state = state.copyWith(messages: [...state.messages, msg]);
+    _playPopSound();
+  }
+
+  Future<void> _playPopSound() async {
+    try {
+      if (_audioPlayer.state == PlayerState.playing) {
+        await _audioPlayer.stop();
+      }
+      await _audioPlayer.play(AssetSource('audio/minimal_pop.mp3'), mode: PlayerMode.lowLatency);
+    } catch (e) {
+      debugPrint("Error playing sound: $e");
+    }
   }
 
   bool _amIHost() {
@@ -364,7 +439,25 @@ class PartyScreenNotifier extends Notifier<DetailedPartyState> {
   }
 
   // Actions
-  void addTrack(String partyId, dynamic track) {
+  void addTrack(String partyId, Map<String, dynamic> track) {
+    // Optimistic Update (Check for duplicates locally first)
+    final isDuplicate = state.queue.any((t) => t['url'] == track['url']);
+    if (isDuplicate) {
+       _addSystemMessage("Song is already in the queue!");
+       return;
+    }
+
+    // Add locally immediately for zero-latency feel
+    final optimisticTrack = {
+      "id": "pending-${DateTime.now().millisecondsSinceEpoch}",
+      "url": track["url"],
+      "title": track["title"] ?? "Loading...",
+      "addedBy": track["addedBy"] ?? "You",
+      "isPending": true,
+    };
+    
+    state = state.copyWith(queue: [...state.queue, optimisticTrack]);
+
     _socket.emit("ADD_TRACK", {"partyId": partyId, "track": track});
   }
 
@@ -398,8 +491,23 @@ class PartyScreenNotifier extends Notifier<DetailedPartyState> {
   }
 
   void sendMessage(String partyId, String text, String username) {
+    final msgId = const Uuid().v4();
+    
+    // Optimistic UI Update
+    final localMsg = {
+      'id': msgId,
+      'senderId': _socket.id,
+      'username': username,
+      'text': text,
+      'timestamp': DateTime.now().millisecondsSinceEpoch,
+      'type': 'user',
+    };
+    state = state.copyWith(messages: [...state.messages, localMsg]);
+    _playPopSound();
+
     _socket.emit("SEND_MESSAGE", {
       "partyId": partyId,
+      "id": msgId, // Pass local ID to server
       "message": text,
       "username": username,
     });

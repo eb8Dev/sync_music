@@ -4,10 +4,10 @@ import 'package:flutter/material.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:sync_music/services/support_service.dart';
-import 'package:sync_music/support_screen.dart';
+import 'package:sync_music/screens/support_screen.dart';
 import 'package:sync_music/widgets/glass_card.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:sync_music/playlists_screen.dart';
+import 'package:sync_music/screens/playlists_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
