@@ -229,7 +229,7 @@ class _PlaylistImportSheetState extends ConsumerState<PlaylistImportSheet> {
                         width: 40,
                         height: 40,
                         fit: BoxFit.cover,
-                        errorBuilder: (_, __, ___) => Container(color: Colors.white10),
+                        errorBuilder: (_, _, _) => Container(color: Colors.white10),
                       ),
                     ),
                     title: Text(

@@ -1,10 +1,10 @@
-import 'package:socket_io_client/socket_io_client.dart' as IO;
+import 'package:socket_io_client/socket_io_client.dart' as io;
 
 class SocketService {
-  late IO.Socket socket;
+  late io.Socket socket;
 
   void connect(String url) {
-    socket = IO.io(url, {
+    socket = io.io(url, {
       'transports': ['websocket'],
       'autoConnect': true,
     });

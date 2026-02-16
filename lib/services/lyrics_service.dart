@@ -26,7 +26,7 @@ class LyricsService {
       return "No lyrics found for '$cleanTitle'.";
     } catch (e) {
       // Rethrow so the UI can show the Retry button
-      throw e;
+      rethrow;
     }
   }
 

@@ -15,6 +15,53 @@ class AddToPlaylistSheet extends ConsumerWidget {
     this.onSuccess,
   });
 
+  void _showCreatePlaylistDialog(BuildContext context, WidgetRef ref) {
+    final TextEditingController controller = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF1E1E1E),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text("New Playlist", style: TextStyle(color: Colors.white)),
+        content: TextField(
+          controller: controller,
+          style: const TextStyle(color: Colors.white),
+          decoration: const InputDecoration(
+            hintText: "Playlist Name",
+            hintStyle: TextStyle(color: Colors.white54),
+            enabledBorder: UnderlineInputBorder(
+              borderSide: BorderSide(color: Colors.white24),
+            ),
+            focusedBorder: UnderlineInputBorder(
+              borderSide: BorderSide(color: Colors.deepPurpleAccent),
+            ),
+          ),
+          autofocus: true,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text("Cancel"),
+          ),
+          TextButton(
+            onPressed: () {
+              if (controller.text.trim().isNotEmpty) {
+                ref
+                    .read(playlistProvider.notifier)
+                    .createPlaylist(controller.text.trim());
+                Navigator.pop(context);
+              }
+            },
+            child: const Text(
+              "Create",
+              style: TextStyle(color: Colors.deepPurpleAccent),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final playlists = ref.watch(playlistProvider);
@@ -38,7 +85,7 @@ class AddToPlaylistSheet extends ConsumerWidget {
                   width: 50,
                   height: 50,
                   fit: BoxFit.cover,
-                  errorBuilder: (_, __, ___) => Container(
+                  errorBuilder: (_, _, _) => Container(
                     width: 50,
                     height: 50,
                     color: Colors.white10,
@@ -86,24 +133,49 @@ class AddToPlaylistSheet extends ConsumerWidget {
                       style: TextStyle(color: Colors.white54),
                     ),
                     const SizedBox(height: 16),
-                    TextButton(
-                      onPressed: () {
-                        // TODO: Navigate to create playlist or show dialog
-                        Navigator.pop(context);
-                      },
-                      child: const Text("Create one in Settings"),
+                    ElevatedButton.icon(
+                      onPressed: () => _showCreatePlaylistDialog(context, ref),
+                      icon: const Icon(Icons.add, size: 18),
+                      label: const Text("Create New Playlist"),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.deepPurpleAccent,
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
                     ),
                   ],
                 ),
               ),
             )
           else
-            Expanded(
+            Flexible(
               child: ListView.builder(
                 shrinkWrap: true,
-                itemCount: playlists.length,
+                itemCount: playlists.length + 1,
                 itemBuilder: (context, index) {
-                  final playlist = playlists[index];
+                  if (index == 0) {
+                    return ListTile(
+                      contentPadding: const EdgeInsets.symmetric(vertical: 4),
+                      leading: Container(
+                        width: 48,
+                        height: 48,
+                        decoration: BoxDecoration(
+                          color: Colors.deepPurpleAccent.withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: const Icon(Icons.add, color: Colors.deepPurpleAccent),
+                      ),
+                      title: const Text(
+                        "Create New Playlist",
+                        style: TextStyle(color: Colors.deepPurpleAccent, fontWeight: FontWeight.bold),
+                      ),
+                      onTap: () => _showCreatePlaylistDialog(context, ref),
+                    );
+                  }
+
+                  final playlist = playlists[index - 1];
                   // Check if song already exists in playlist
                   final bool exists = playlist.songs.any((s) => s.id == song.id);
 

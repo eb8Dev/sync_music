@@ -44,5 +44,7 @@ app.*.map.json
 /android/app/profile
 /android/app/release
 
+.env
+
 AGENT_CONTEXT.md
 oldindex.js

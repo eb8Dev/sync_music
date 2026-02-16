@@ -23,7 +23,7 @@ Future<File> generatePartyImage(String partyCode) async {
     ..shader = ui.Gradient.radial(
       Offset(image.width / 2, image.height / 2),
       180,
-      [Colors.white.withOpacity(0.25), Colors.transparent],
+      [Colors.white.withValues(alpha: 0.25), Colors.transparent],
     );
   canvas.drawCircle(Offset(image.width / 2, image.height / 2), 180, glowPaint);
 

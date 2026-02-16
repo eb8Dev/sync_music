@@ -67,7 +67,7 @@ class _QRScannerScreenState extends State<QRScannerScreen>
                   _controller.forward();
 
                   await Future.delayed(const Duration(milliseconds: 700));
-                  if (mounted) {
+                  if (context.mounted) {
                     Navigator.pop(context, barcode.rawValue);
                   }
                   break;

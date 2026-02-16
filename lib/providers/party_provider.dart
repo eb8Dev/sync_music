@@ -2,7 +2,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:socket_io_client/socket_io_client.dart' as IO;
+import 'package:socket_io_client/socket_io_client.dart' as io;
 import 'package:sync_music/providers/socket_provider.dart';
 import 'package:sync_music/providers/user_provider.dart';
 import 'package:sync_music/services/notification_service.dart';
@@ -57,7 +57,7 @@ class PartyState {
 }
 
 class PartyNotifier extends Notifier<PartyState> {
-  late IO.Socket _socket;
+  late io.Socket _socket;
   Timer? _connectionTimeoutTimer;
 
   @override

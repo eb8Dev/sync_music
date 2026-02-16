@@ -51,14 +51,14 @@ class _SupportScreenState extends ConsumerState<SupportScreen> {
     super.dispose();
   }
 
-  void _onSuccess(data) {
+  void _onSuccess(dynamic data) {
     if (!mounted) return;
     setState(() => _isSubmitting = false);
     CustomSnackbar.show(context, data['message'] ?? "Ticket submitted!");
     Navigator.pop(context); // Close screen
   }
 
-  void _onError(msg) {
+  void _onError(dynamic msg) {
     if (!mounted) return;
     setState(() => _isSubmitting = false);
     CustomSnackbar.show(context, msg.toString(), isError: true);

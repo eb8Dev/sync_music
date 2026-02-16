@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:socket_io_client/socket_io_client.dart' as IO;
+import 'package:socket_io_client/socket_io_client.dart' as io;
 import 'package:sync_music/providers/socket_provider.dart';
 
 class DetailedPartyState {
@@ -78,7 +78,7 @@ class DetailedPartyState {
 }
 
 class PartyScreenNotifier extends Notifier<DetailedPartyState> {
-  late IO.Socket _socket;
+  late io.Socket _socket;
   int _timeOffset = 0; // ClientTime - ServerTime
 
   @override
@@ -183,7 +183,7 @@ class PartyScreenNotifier extends Notifier<DetailedPartyState> {
 
   // ---- Handlers ----
 
-  void _onQueueUpdated(data) {
+  void _onQueueUpdated(dynamic data) {
     final newQueue = List.from(data);
     if (newQueue.length > state.queue.length) {
        final newTrack = newQueue.last;
@@ -192,7 +192,7 @@ class PartyScreenNotifier extends Notifier<DetailedPartyState> {
     state = state.copyWith(queue: newQueue);
   }
 
-  void _onPlaybackUpdate(data) {
+  void _onPlaybackUpdate(dynamic data) {
     final serverTime = (data["serverTime"] as num?)?.toInt();
     final serverStartedAt = (data["startedAt"] as num?)?.toInt();
 
@@ -203,7 +203,7 @@ class PartyScreenNotifier extends Notifier<DetailedPartyState> {
     );
   }
 
-  void _onSync(data) {
+  void _onSync(dynamic data) {
      final serverTime = (data["serverTime"] as num?)?.toInt();
      final serverStartedAt = (data["startedAt"] as num?)?.toInt();
      final adjustedStartedAt = _getAdjustedStartedAt(serverStartedAt, serverTime);
@@ -227,18 +227,18 @@ class PartyScreenNotifier extends Notifier<DetailedPartyState> {
      }
   }
 
-  void _onPartySize(data) {
+  void _onPartySize(dynamic data) {
     state = state.copyWith(partySize: data["size"] ?? 1);
   }
 
-  void _onVoteUpdate(data) {
+  void _onVoteUpdate(dynamic data) {
     state = state.copyWith(
       votesCount: data["votes"] ?? 0,
       votesRequired: data["required"] ?? 0,
     );
   }
 
-  void _onChatMessage(data) {
+  void _onChatMessage(dynamic data) {
     debugPrint("Chat message received: $data");
     final text = (data['message'] ?? data['text']) as String?;
     
@@ -298,11 +298,11 @@ class PartyScreenNotifier extends Notifier<DetailedPartyState> {
     return me['isHost'] == true;
   }
 
-  void _onInfo(msg) {
+  void _onInfo(dynamic msg) {
     _addSystemMessage(msg.toString());
   }
 
-  void _onMembersList(data) {
+  void _onMembersList(dynamic data) {
     try {
       state = state.copyWith(members: List<Map<String, dynamic>>.from(data));
     } catch (e) {
@@ -310,11 +310,11 @@ class PartyScreenNotifier extends Notifier<DetailedPartyState> {
     }
   }
 
-  void _onThemeUpdate(data) {
+  void _onThemeUpdate(dynamic data) {
     state = state.copyWith(themeIndex: data["themeIndex"] ?? 0);
   }
 
-  void _onHostUpdate(data) {
+  void _onHostUpdate(dynamic data) {
     final newHostId = data["hostId"];
     final updatedMembers = state.members.map((m) {
       return {...m, 'isHost': m['id'] == newHostId};
@@ -323,7 +323,7 @@ class PartyScreenNotifier extends Notifier<DetailedPartyState> {
     _addSystemMessage("Host has changed!");
   }
 
-  void _onSettingsUpdate(data) {
+  void _onSettingsUpdate(dynamic data) {
     try {
       Map<String, bool> newSettings = {
          "guestControls": data["guestControls"] == true,

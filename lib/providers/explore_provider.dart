@@ -1,5 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:socket_io_client/socket_io_client.dart' as IO;
+import 'package:socket_io_client/socket_io_client.dart' as io;
 import 'package:sync_music/providers/socket_provider.dart';
 
 class ExploreState {
@@ -17,7 +17,7 @@ class ExploreState {
 }
 
 class ExploreNotifier extends Notifier<ExploreState> {
-  late IO.Socket _socket;
+  late io.Socket _socket;
 
   @override
   ExploreState build() {
