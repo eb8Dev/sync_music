@@ -81,21 +81,21 @@ class PartyNotifier extends Notifier<PartyState> {
       _socket.on("connect", (_) {
         debugPrint("Socket Connected!");
         if (state.partyId != null && !state.isPartyEnded) {
-           debugPrint("Auto-reconnecting to active party: ${state.partyId}");
-           final userState = ref.read(userProvider);
-           if (state.isHost) {
-              reconnectAsHost(
-                partyId: state.partyId!,
-                username: userState.username,
-                avatar: userState.avatar,
-              );
-           } else {
-              joinParty(
-                partyId: state.partyId!,
-                username: userState.username,
-                avatar: userState.avatar,
-              );
-           }
+          debugPrint("Auto-reconnecting to active party: ${state.partyId}");
+          final userState = ref.read(userProvider);
+          if (state.isHost) {
+            reconnectAsHost(
+              partyId: state.partyId!,
+              username: userState.username,
+              avatar: userState.avatar,
+            );
+          } else {
+            joinParty(
+              partyId: state.partyId!,
+              username: userState.username,
+              avatar: userState.avatar,
+            );
+          }
         }
       });
     }
@@ -116,7 +116,7 @@ class PartyNotifier extends Notifier<PartyState> {
 
     _socket.on("KICKED", (_) async {
       debugPrint("KICKED event received");
-      
+
       // Record kick logic locally
       if (state.partyId != null) {
         final prefs = await SharedPreferences.getInstance();
@@ -124,21 +124,23 @@ class PartyNotifier extends Notifier<PartyState> {
         final kicks = prefs.getStringList(kickKey) ?? [];
         kicks.add(DateTime.now().toIso8601String());
         await prefs.setStringList(kickKey, kicks);
-        debugPrint("Kick recorded. Total kicks for ${state.partyId}: ${kicks.length}");
+        debugPrint(
+          "Kick recorded. Total kicks for ${state.partyId}: ${kicks.length}",
+        );
       }
 
       clearSession();
       state = state.copyWith(isKicked: true);
     });
-    
+
     if (!_socket.hasListeners("PARTY_STATE")) {
-       _socket.on("PARTY_STATE", (data) {
+      _socket.on("PARTY_STATE", (data) {
         debugPrint("PARTY_STATE received: $data");
         _cancelTimeout(); // Success!
-        
+
         final pId = data["id"];
         final hostStatus = data["isHost"] == true;
-        
+
         // Save session
         _saveSession(pId, hostStatus);
 
@@ -160,21 +162,26 @@ class PartyNotifier extends Notifier<PartyState> {
       _socket.on("ERROR", (msg) {
         debugPrint("SERVER ERROR: $msg");
         _cancelTimeout(); // Error received, stop timer
-        state = state.copyWith(
-          connecting: false,
-          error: msg.toString(),
-        );
+        state = state.copyWith(connecting: false, error: msg.toString());
       });
     }
 
     if (!_socket.hasListeners("HOST_UPDATE")) {
       _socket.on("HOST_UPDATE", (data) {
-        final newHostId = data["hostId"];
-        final isNowHost = _socket.id == newHostId;
+        // Resolve host by the PERSISTENT userId, never the socket id — the
+        // socket id changes on every reconnect, which is what used to demote
+        // the host to a member on flaky networks. The creator is the permanent
+        // host, so this just confirms/restores our role on reconnect.
+        final myUserId = ref.read(userProvider).userId;
+        final hostUserId = data is Map ? data["hostUserId"] : null;
+        if (hostUserId == null || state.partyId == null) return;
+        final isNowHost = hostUserId == myUserId;
         if (state.isHost != isNowHost) {
-           debugPrint("PartyNotifier: Role changed. isHost: $isNowHost");
-           state = state.copyWith(isHost: isNowHost);
-           _saveSession(state.partyId!, isNowHost);
+          debugPrint(
+            "PartyNotifier: Role resolved by userId. isHost: $isNowHost",
+          );
+          state = state.copyWith(isHost: isNowHost);
+          _saveSession(state.partyId!, isNowHost);
         }
       });
     }
@@ -212,8 +219,8 @@ class PartyNotifier extends Notifier<PartyState> {
     final prefs = await SharedPreferences.getInstance();
     final lastId = prefs.getString("lastPartyId");
     final host = prefs.getBool("isHost") ?? false;
-    
-    state = state.copyWith(lastPartyId: lastId, isHost: host); 
+
+    state = state.copyWith(lastPartyId: lastId, isHost: host);
   }
 
   Future<void> _saveSession(String partyId, bool isHost) async {
@@ -228,7 +235,7 @@ class PartyNotifier extends Notifier<PartyState> {
     await prefs.remove("lastPartyId");
     state = state.copyWith(clearLastPartyId: true);
   }
-  
+
   void clearError() {
     state = state.copyWith(error: null);
   }
@@ -268,22 +275,23 @@ class PartyNotifier extends Notifier<PartyState> {
     final prefs = await SharedPreferences.getInstance();
     final kickKey = "kicks_$partyId";
     final kicks = prefs.getStringList(kickKey) ?? [];
-    
+
     if (kicks.length >= 3) {
       state = state.copyWith(
-        connecting: false, 
-        error: "You are restricted from joining this party."
+        connecting: false,
+        error: "You are restricted from joining this party.",
       );
       return;
     }
-    
+
     if (kicks.isNotEmpty) {
       final lastKick = DateTime.parse(kicks.last);
       final diff = DateTime.now().difference(lastKick);
       if (diff.inMinutes < 5) {
-         state = state.copyWith(
-          connecting: false, 
-          error: "You cannot join this party for another ${5 - diff.inMinutes} minutes."
+        state = state.copyWith(
+          connecting: false,
+          error:
+              "You cannot join this party for another ${5 - diff.inMinutes} minutes.",
         );
         return;
       }
@@ -316,4 +324,6 @@ class PartyNotifier extends Notifier<PartyState> {
   }
 }
 
-final partyProvider = NotifierProvider<PartyNotifier, PartyState>(PartyNotifier.new);
+final partyProvider = NotifierProvider<PartyNotifier, PartyState>(
+  PartyNotifier.new,
+);

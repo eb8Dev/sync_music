@@ -102,7 +102,6 @@ flutter:
   #   - images/a_dot_burr.jpeg
   assets:
     - assets/new_sync_music_background.png
-    - assets/new_sync_music_background.png
     - assets/music_note.png
   #   - images/a_dot_ham.jpeg
 

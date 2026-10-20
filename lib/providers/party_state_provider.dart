@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:socket_io_client/socket_io_client.dart' as io;
 import 'package:sync_music/providers/socket_provider.dart';
+import 'package:sync_music/providers/party_provider.dart';
 
 class DetailedPartyState {
   final String? partyId;
@@ -91,60 +92,77 @@ class PartyScreenNotifier extends Notifier<DetailedPartyState> {
 
   int? _getAdjustedStartedAt(int? serverStartedAt, int? serverTime) {
     if (serverStartedAt == null) return null;
-    
+
     // Update offset if serverTime is provided
     if (serverTime != null) {
       final now = DateTime.now().millisecondsSinceEpoch;
       _timeOffset = now - serverTime;
     }
-    
+
     // Apply offset: startedAtLocal = startedAtServer + (Client - Server)
     return serverStartedAt + _timeOffset;
   }
 
-  void init(Map<String, dynamic> initialData) {
-    _cleanupListeners(); // Remove any existing listeners first
-    
-    // Parse settings safely
-    Map<String, bool> parsedSettings = {
+  Map<String, bool> _parseSettings(dynamic raw) {
+    final parsed = <String, bool>{
       "guestControls": false,
       "guestQueueing": true,
       "voteSkip": true,
     };
-    
-    if (initialData["settings"] != null) {
-      try {
-        final raw = initialData["settings"] as Map;
-        parsedSettings = {
-           "guestControls": raw["guestControls"] == true,
-           "guestQueueing": raw["guestQueueing"] == true,
-           "voteSkip": raw["voteSkip"] == true,
-        };
-      } catch (e) {
-        debugPrint("Error parsing settings: $e");
-      }
+    if (raw is Map) {
+      parsed["guestControls"] = raw["guestControls"] == true;
+      parsed["guestQueueing"] = raw["guestQueueing"] == true;
+      parsed["voteSkip"] = raw["voteSkip"] == true;
     }
+    return parsed;
+  }
 
-    final serverTime = (initialData["serverTime"] as num?)?.toInt();
-    final serverStartedAt = (initialData["startedAt"] as num?)?.toInt();
+  /// Seeds in-party state from the server's authoritative PARTY_STATE snapshot.
+  /// This is the single source of truth for in-party data. When [preserveLocal]
+  /// is true (a reconnect re-seed) we keep client-only state the snapshot doesn't
+  /// carry — chat messages and any running countdown — while everything the
+  /// server owns (queue, playback, members, settings) is taken from the snapshot.
+  void _applySnapshot(Map<String, dynamic> data, {bool preserveLocal = false}) {
+    final serverTime = (data["serverTime"] as num?)?.toInt();
+    final serverStartedAt = (data["startedAt"] as num?)?.toInt();
 
     state = DetailedPartyState(
-      partyId: initialData["id"],
-      queue: List.from(initialData["queue"] ?? []),
-      currentIndex: initialData["currentIndex"] ?? 0,
-      isPlaying: initialData["isPlaying"] == true,
+      partyId: data["id"] ?? state.partyId,
+      queue: data["queue"] != null ? List.from(data["queue"]) : state.queue,
+      currentIndex: data["currentIndex"] ?? 0,
+      isPlaying: data["isPlaying"] == true,
       startedAt: _getAdjustedStartedAt(serverStartedAt, serverTime),
-      partySize: initialData["size"] ?? 1,
-      themeIndex: initialData["themeIndex"] ?? 0,
-      settings: parsedSettings,
-      members: initialData["members"] != null 
-          ? List<Map<String, dynamic>>.from(initialData["members"]) 
-          : const [],
+      partySize: data["size"] ?? state.partySize,
+      themeIndex: data["themeIndex"] ?? 0,
+      settings: _parseSettings(data["settings"]),
+      members: data["members"] != null
+          ? List<Map<String, dynamic>>.from(data["members"])
+          : state.members,
+      messages: preserveLocal ? state.messages : const [],
+      votesCount: preserveLocal ? state.votesCount : 0,
+      votesRequired: preserveLocal ? state.votesRequired : 0,
+      isDisconnected: false,
+      countdown: preserveLocal ? state.countdown : null,
     );
+  }
+
+  void init(Map<String, dynamic> initialData) {
+    _cleanupListeners(); // Remove any existing listeners first
+    _applySnapshot(initialData);
     _setupListeners();
   }
 
+  /// The server re-emits PARTY_STATE on every rejoin/reconnect. Re-seeding from
+  /// it here means the detailed store can never drift from the server snapshot
+  /// after a dropped connection — the bug class behind "state feels off".
+  void _onPartyState(dynamic data) {
+    if (data is Map) {
+      _applySnapshot(Map<String, dynamic>.from(data), preserveLocal: true);
+    }
+  }
+
   void _cleanupListeners() {
+    _socket.off("PARTY_STATE", _onPartyState);
     _socket.off("QUEUE_UPDATED", _onQueueUpdated);
     _socket.off("PLAYBACK_UPDATE", _onPlaybackUpdate);
     _socket.off("SYNC", _onSync);
@@ -156,13 +174,14 @@ class PartyScreenNotifier extends Notifier<DetailedPartyState> {
     _socket.off("THEME_UPDATE", _onThemeUpdate);
     _socket.off("HOST_UPDATE", _onHostUpdate);
     _socket.off("SETTINGS_UPDATE", _onSettingsUpdate);
-    // Note: Disconnect/Connect handlers are tricky with Socket.IO client dart 
+    // Note: Disconnect/Connect handlers are tricky with Socket.IO client dart
     // as it doesn't support named handler removal for built-in events easily
     // without exact reference, but our main issue is custom events.
     // For now, we leave connect/disconnect as they just update a bool flag.
   }
 
   void _setupListeners() {
+    _socket.on("PARTY_STATE", _onPartyState);
     _socket.on("QUEUE_UPDATED", _onQueueUpdated);
     _socket.on("PLAYBACK_UPDATE", _onPlaybackUpdate);
     _socket.on("SYNC", _onSync);
@@ -186,8 +205,10 @@ class PartyScreenNotifier extends Notifier<DetailedPartyState> {
   void _onQueueUpdated(dynamic data) {
     final newQueue = List.from(data);
     if (newQueue.length > state.queue.length) {
-       final newTrack = newQueue.last;
-       _addSystemMessage("${newTrack['addedBy'] ?? 'Someone'} added '${newTrack['title']}'");
+      final newTrack = newQueue.last;
+      _addSystemMessage(
+        "${newTrack['addedBy'] ?? 'Someone'} added '${newTrack['title']}'",
+      );
     }
     state = state.copyWith(queue: newQueue);
   }
@@ -204,27 +225,30 @@ class PartyScreenNotifier extends Notifier<DetailedPartyState> {
   }
 
   void _onSync(dynamic data) {
-     final serverTime = (data["serverTime"] as num?)?.toInt();
-     final serverStartedAt = (data["startedAt"] as num?)?.toInt();
-     final adjustedStartedAt = _getAdjustedStartedAt(serverStartedAt, serverTime);
+    final serverTime = (data["serverTime"] as num?)?.toInt();
+    final serverStartedAt = (data["startedAt"] as num?)?.toInt();
+    final adjustedStartedAt = _getAdjustedStartedAt(
+      serverStartedAt,
+      serverTime,
+    );
 
-     // Update even if index didn't change, to correct drift
-     // We check if startedAt has drifted by > 100ms
-     bool startedAtChanged = false;
-     if (adjustedStartedAt != null) {
-        if (state.startedAt == null) {
-           startedAtChanged = true;
-        } else {
-           startedAtChanged = (state.startedAt! - adjustedStartedAt).abs() > 100;
-        }
-     }
+    // Update even if index didn't change, to correct drift
+    // We check if startedAt has drifted by > 100ms
+    bool startedAtChanged = false;
+    if (adjustedStartedAt != null) {
+      if (state.startedAt == null) {
+        startedAtChanged = true;
+      } else {
+        startedAtChanged = (state.startedAt! - adjustedStartedAt).abs() > 100;
+      }
+    }
 
-     if (data["currentIndex"] != state.currentIndex || startedAtChanged) {
-        state = state.copyWith(
-          currentIndex: data["currentIndex"],
-          startedAt: adjustedStartedAt ?? state.startedAt,
-        );
-     }
+    if (data["currentIndex"] != state.currentIndex || startedAtChanged) {
+      state = state.copyWith(
+        currentIndex: data["currentIndex"],
+        startedAt: adjustedStartedAt ?? state.startedAt,
+      );
+    }
   }
 
   void _onPartySize(dynamic data) {
@@ -241,30 +265,33 @@ class PartyScreenNotifier extends Notifier<DetailedPartyState> {
   void _onChatMessage(dynamic data) {
     debugPrint("Chat message received: $data");
     final text = (data['message'] ?? data['text']) as String?;
-    
+
     if (text == "##COUNTDOWN##") {
-       debugPrint("Countdown signal received!");
-       // Only start if not already counting down
-       if (state.countdown == null) {
-          _runCountdownLogic(isHost: false);
-       }
-       return; 
+      debugPrint("Countdown signal received!");
+      // Only start if not already counting down
+      if (state.countdown == null) {
+        _runCountdownLogic(isHost: false);
+      }
+      return;
     }
 
     // ---- Chat Commands (Host Only Bot Logic) ----
     if (text != null && text.startsWith("!") && state.partyId != null) {
       final senderId = data['senderId'];
-      final isSenderHost = state.members.firstWhere(
+      final isSenderHost =
+          state.members.firstWhere(
             (m) => m['id'] == senderId,
             orElse: () => {'isHost': false},
-          )['isHost'] == true;
+          )['isHost'] ==
+          true;
 
       // Allow if Sender is Host OR Guest Controls are enabled
-      final canControl = isSenderHost || (state.settings["guestControls"] == true);
+      final canControl =
+          isSenderHost || (state.settings["guestControls"] == true);
 
       if (canControl && _amIHost()) {
-         // I am the host instance, so I execute the actual socket emit on behalf of the user's command
-         // (This ensures only one client sends the command to server)
+        // I am the host instance, so I execute the actual socket emit on behalf of the user's command
+        // (This ensures only one client sends the command to server)
         final command = text.trim().toLowerCase();
         if (command == "!play") {
           play(state.partyId!);
@@ -272,12 +299,12 @@ class PartyScreenNotifier extends Notifier<DetailedPartyState> {
           pause(state.partyId!);
         } else if (command == "!next") {
           if (state.currentIndex < state.queue.length - 1) {
-             changeTrack(state.partyId!, state.currentIndex + 1);
+            changeTrack(state.partyId!, state.currentIndex + 1);
           }
         } else if (command == "!prev") {
-           if (state.currentIndex > 0) {
-             changeTrack(state.partyId!, state.currentIndex - 1);
-           }
+          if (state.currentIndex > 0) {
+            changeTrack(state.partyId!, state.currentIndex - 1);
+          }
         }
       }
     }
@@ -287,15 +314,9 @@ class PartyScreenNotifier extends Notifier<DetailedPartyState> {
   }
 
   bool _amIHost() {
-    final myId = _socket.id;
-    if (myId == null) return false;
-    // Check if any member with my ID is host
-    // (Assuming state.members is up to date)
-    final me = state.members.firstWhere(
-      (m) => m['id'] == myId, 
-      orElse: () => {},
-    );
-    return me['isHost'] == true;
+    // Single source of truth for role. partyProvider resolves host by the
+    // persistent userId, so we never compare against the volatile socket id here.
+    return ref.read(partyProvider).isHost;
   }
 
   void _onInfo(dynamic msg) {
@@ -315,20 +336,25 @@ class PartyScreenNotifier extends Notifier<DetailedPartyState> {
   }
 
   void _onHostUpdate(dynamic data) {
-    final newHostId = data["hostId"];
+    // Mark the host in the member list by PERSISTENT userId (socket ids change
+    // on reconnect). The authoritative MEMBERS_LIST also refreshes these flags;
+    // this just updates them immediately. No "host changed" message — under the
+    // creator-is-permanent-host model this fires on the host simply reconnecting,
+    // and the server already sends a human-readable INFO for that.
+    final hostUserId = data is Map ? data["hostUserId"] : null;
+    if (hostUserId == null) return;
     final updatedMembers = state.members.map((m) {
-      return {...m, 'isHost': m['id'] == newHostId};
+      return {...m, 'isHost': m['userId'] == hostUserId};
     }).toList();
     state = state.copyWith(members: updatedMembers);
-    _addSystemMessage("Host has changed!");
   }
 
   void _onSettingsUpdate(dynamic data) {
     try {
       Map<String, bool> newSettings = {
-         "guestControls": data["guestControls"] == true,
-         "guestQueueing": data["guestQueueing"] == true,
-         "voteSkip": data["voteSkip"] == true,
+        "guestControls": data["guestControls"] == true,
+        "guestQueueing": data["guestQueueing"] == true,
+        "voteSkip": data["voteSkip"] == true,
       };
       state = state.copyWith(settings: newSettings);
       _addSystemMessage("Party settings updated.");
@@ -355,7 +381,7 @@ class PartyScreenNotifier extends Notifier<DetailedPartyState> {
         timer.cancel();
         state = state.copyWith(clearCountdown: true);
         if (isHost && partyId != null) {
-           play(partyId);
+          play(partyId);
         }
       } else {
         state = state.copyWith(countdown: current - 1);
@@ -380,7 +406,7 @@ class PartyScreenNotifier extends Notifier<DetailedPartyState> {
   void pause(String partyId) {
     _socket.emit("PAUSE", {"partyId": partyId});
   }
-  
+
   void seek(String partyId, int position) {
     _socket.emit("SEEK", {"partyId": partyId, "position": position});
   }
@@ -413,15 +439,18 @@ class PartyScreenNotifier extends Notifier<DetailedPartyState> {
     final nextIndex = (state.themeIndex + 1) % 5; // Assuming 5 themes
     _socket.emit("CHANGE_THEME", {"partyId": partyId, "themeIndex": nextIndex});
   }
-  
+
   void updateSettings(String partyId, Map<String, bool> newSettings) {
-    _socket.emit("UPDATE_SETTINGS", {"partyId": partyId, "settings": newSettings});
+    _socket.emit("UPDATE_SETTINGS", {
+      "partyId": partyId,
+      "settings": newSettings,
+    });
   }
 
   void kickUser(String partyId, String targetId) {
     _socket.emit("KICK_USER", {"partyId": partyId, "targetId": targetId});
   }
-  
+
   void endParty(String partyId) {
     _socket.emit("END_PARTY", {"partyId": partyId});
   }
@@ -431,4 +460,7 @@ class PartyScreenNotifier extends Notifier<DetailedPartyState> {
   }
 }
 
-final partyStateProvider = NotifierProvider<PartyScreenNotifier, DetailedPartyState>(PartyScreenNotifier.new);
+final partyStateProvider =
+    NotifierProvider<PartyScreenNotifier, DetailedPartyState>(
+      PartyScreenNotifier.new,
+    );

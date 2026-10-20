@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui' show ImageFilter;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -139,14 +140,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   void _showProfileEditor({VoidCallback? onSave}) {
     final userState = ref.read(userProvider);
     final tempNameCtrl = TextEditingController(text: userState.username);
-    
+
     // Find index of current avatar
     int initialIndex = avatars.indexOf(userState.avatar);
     if (initialIndex == -1) initialIndex = 0;
-    
-    final FixedExtentScrollController wheelController = FixedExtentScrollController(
-      initialItem: initialIndex,
-    );
+
+    final FixedExtentScrollController wheelController =
+        FixedExtentScrollController(initialItem: initialIndex);
 
     showModalBottomSheet(
       context: context,
@@ -181,7 +181,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                       textAlign: TextAlign.center,
                     ),
                     const SizedBox(height: 32),
-              
+
                     // ---- HORIZONTAL SPIN WHEEL AVATAR SELECTOR ----
                     SizedBox(
                       height: 120,
@@ -194,21 +194,27 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                             height: 80,
                             decoration: BoxDecoration(
                               shape: BoxShape.circle,
-                              color: Theme.of(context).primaryColor.withValues(alpha: 0.15),
+                              color: Theme.of(
+                                context,
+                              ).primaryColor.withValues(alpha: 0.15),
                               border: Border.all(
-                                color: Theme.of(context).primaryColor.withValues(alpha: 0.5),
+                                color: Theme.of(
+                                  context,
+                                ).primaryColor.withValues(alpha: 0.5),
                                 width: 2,
                               ),
                               boxShadow: [
                                 BoxShadow(
-                                  color: Theme.of(context).primaryColor.withValues(alpha: 0.2),
+                                  color: Theme.of(
+                                    context,
+                                  ).primaryColor.withValues(alpha: 0.2),
                                   blurRadius: 20,
                                   spreadRadius: 2,
                                 ),
                               ],
                             ),
                           ),
-              
+
                           // The Wheel
                           RotatedBox(
                             quarterTurns: -1,
@@ -247,11 +253,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                       textAlign: TextAlign.center,
                     ),
                     const SizedBox(height: 32),
-              
+
                     // Name Input
                     TextField(
                       controller: tempNameCtrl,
-                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                      ),
                       textAlign: TextAlign.center,
                       decoration: InputDecoration(
                         hintText: "Your Name",
@@ -262,21 +271,24 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                           borderRadius: BorderRadius.circular(16),
                           borderSide: BorderSide.none,
                         ),
-                        contentPadding: const EdgeInsets.symmetric(vertical: 18),
+                        contentPadding: const EdgeInsets.symmetric(
+                          vertical: 18,
+                        ),
                       ),
                     ),
                     const SizedBox(height: 24),
-              
+
                     ElevatedButton(
                       onPressed: () {
                         final name = tempNameCtrl.text.trim();
                         if (name.isEmpty) return;
-              
-                        final selectedAvatarIndex = wheelController.selectedItem;
+
+                        final selectedAvatarIndex =
+                            wheelController.selectedItem;
                         final avatar = avatars[selectedAvatarIndex];
-              
+
                         ref.read(userProvider.notifier).saveUser(name, avatar);
-                        
+
                         Navigator.pop(context);
                         onSave?.call();
                       },
@@ -291,7 +303,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                       ),
                       child: const Text(
                         "SAVE CHANGES",
-                        style: TextStyle(fontWeight: FontWeight.w900, letterSpacing: 1),
+                        style: TextStyle(
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: 1,
+                        ),
                       ),
                     ),
                     const SizedBox(height: 24),
@@ -698,170 +713,184 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       }
     });
 
-    return Scaffold(
-      extendBodyBehindAppBar: true,
-      appBar: AppBar(
-        title: GestureDetector(
-          onTap: _showProfileEditor,
-          child: Row(
-            children: [
-              Container(
-                width: 36,
-                height: 36,
-                alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.1),
-                  shape: BoxShape.circle,
-                  border: Border.all(
-                    color: Colors.white.withValues(alpha: 0.2),
+    return Stack(
+      children: [
+        Scaffold(
+          extendBodyBehindAppBar: true,
+          appBar: AppBar(
+            title: GestureDetector(
+              onTap: _showProfileEditor,
+              child: Row(
+                children: [
+                  Container(
+                    width: 36,
+                    height: 36,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.1),
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: Colors.white.withValues(alpha: 0.2),
+                      ),
+                    ),
+                    child: Text(
+                      userState.avatar,
+                      style: const TextStyle(fontSize: 20),
+                    ),
                   ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          "Hello, ${userState.username.isEmpty ? 'Guest' : userState.username}",
+                          style: const TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white,
+                          ),
+                        ),
+                        Text(
+                          "Ready to jam?",
+                          style: TextStyle(
+                            fontSize: 10,
+                            color: Colors.white.withValues(alpha: 0.6),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              IconButton(
+                icon: const Icon(
+                  FontAwesomeIcons.gear,
+                  color: Colors.white,
+                  size: 20,
                 ),
-                child: Text(
-                  userState.avatar,
-                  style: const TextStyle(fontSize: 20),
+                onPressed: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const SettingsScreen()),
                 ),
               ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      "Hello, ${userState.username.isEmpty ? 'Guest' : userState.username}",
-                      style: const TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.white,
-                      ),
-                    ),
-                    Text(
-                      "Ready to jam?",
-                      style: TextStyle(
-                        fontSize: 10,
-                        color: Colors.white.withValues(alpha: 0.6),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
+              const SizedBox(width: 8),
             ],
           ),
-        ),
-        actions: [
-          IconButton(
-            icon: const Icon(FontAwesomeIcons.gear, color: Colors.white, size: 20),
-            onPressed: () => Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => const SettingsScreen()),
+          body: Container(
+            decoration: const BoxDecoration(
+              gradient: RadialGradient(
+                center: Alignment(-0.8, -0.6),
+                radius: 1.6,
+                colors: [Color(0xFF1E2433), Color(0xFF0B0E14)],
+                stops: [0.0, 1.0],
+              ),
             ),
-          ),
-          const SizedBox(width: 8),
-        ],
-      ),
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: RadialGradient(
-            center: Alignment(-0.8, -0.6),
-            radius: 1.6,
-            colors: [Color(0xFF1E2433), Color(0xFF0B0E14)],
-            stops: [0.0, 1.0],
-          ),
-        ),
-        child: SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                const SizedBox(height: 20),
-
-                // 1. Resume Card (Top Priority)
-                if (partyState.lastPartyId != null && !partyState.connecting)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 24),
-                    child: ResumePartyCard(
-                      partyId: partyState.lastPartyId!,
-                      isHost: partyState.isHost,
-                      onHostRejoin: () {
-                        final username = nameCtrl.text.trim();
-                        ref
-                            .read(partyProvider.notifier)
-                            .reconnectAsHost(
-                              partyId: partyState.lastPartyId!,
-                              username: username.isEmpty ? "Host" : username,
-                              avatar: userState.avatar,
-                            );
-                      },
-                      onGuestRejoin: () {
-                        codeCtrl.text = partyState.lastPartyId!;
-                        _joinParty();
-                      },
-                      onDismiss: () =>
-                          ref.read(partyProvider.notifier).clearSession(),
-                    ),
-                  ),
-
-                // 2. Main Hero Action (Host Party)
-                Expanded(child: Center(child: _buildHeroCard(context))),
-
-                const SizedBox(height: 24),
-
-                // 3. Quick Actions Grid
-                Row(
+            child: SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Expanded(
-                      child: _buildActionCard(
-                        context,
-                        title: "Explore",
-                        subtitle: "Public Parties",
-                        icon: FontAwesomeIcons.compass,
-                        color: const Color(0xFF00D2FF),
-                        onTap: () {
-                          if (!_ensureNameSet(() {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => const ExploreScreen(),
-                              ),
-                            );
-                          })) {
-                            return;
-                          }
+                    const SizedBox(height: 20),
 
-                          Navigator.push(
+                    // 1. Resume Card (Top Priority)
+                    if (partyState.lastPartyId != null &&
+                        !partyState.connecting)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 24),
+                        child: ResumePartyCard(
+                          partyId: partyState.lastPartyId!,
+                          isHost: partyState.isHost,
+                          onHostRejoin: () {
+                            final username = nameCtrl.text.trim();
+                            ref
+                                .read(partyProvider.notifier)
+                                .reconnectAsHost(
+                                  partyId: partyState.lastPartyId!,
+                                  username: username.isEmpty
+                                      ? "Host"
+                                      : username,
+                                  avatar: userState.avatar,
+                                );
+                          },
+                          onGuestRejoin: () {
+                            codeCtrl.text = partyState.lastPartyId!;
+                            _joinParty();
+                          },
+                          onDismiss: () =>
+                              ref.read(partyProvider.notifier).clearSession(),
+                        ),
+                      ),
+
+                    // 2. Main Hero Action (Host Party)
+                    Expanded(child: Center(child: _buildHeroCard(context))),
+
+                    const SizedBox(height: 24),
+
+                    // 3. Quick Actions Grid
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _buildActionCard(
                             context,
-                            MaterialPageRoute(
-                              builder: (_) => const ExploreScreen(),
-                            ),
-                          );
-                        },
-                      ),
+                            title: "Explore",
+                            subtitle: "Public Parties",
+                            icon: FontAwesomeIcons.compass,
+                            color: const Color(0xFF00D2FF),
+                            onTap: () {
+                              if (!_ensureNameSet(() {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) => const ExploreScreen(),
+                                  ),
+                                );
+                              })) {
+                                return;
+                              }
+
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => const ExploreScreen(),
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+                        const SizedBox(width: 16),
+                        Expanded(
+                          child: _buildActionCard(
+                            context,
+                            title: "Scan QR",
+                            subtitle: "Join Quickly",
+                            icon: FontAwesomeIcons.qrcode,
+                            color: const Color(0xFFFF2E63),
+                            onTap: _scanQR,
+                          ),
+                        ),
+                      ],
                     ),
-                    const SizedBox(width: 16),
-                    Expanded(
-                      child: _buildActionCard(
-                        context,
-                        title: "Scan QR",
-                        subtitle: "Join Quickly",
-                        icon: FontAwesomeIcons.qrcode,
-                        color: const Color(0xFFFF2E63),
-                        onTap: _scanQR,
-                      ),
-                    ),
+
+                    const SizedBox(height: 24),
+
+                    // 4. Join Section (Modern Pill)
+                    _buildJoinPill(context, theme),
+
+                    const SizedBox(height: 24),
                   ],
                 ),
-
-                const SizedBox(height: 24),
-
-                // 4. Join Section (Modern Pill)
-                _buildJoinPill(context, theme),
-
-                const SizedBox(height: 24),
-              ],
+              ),
             ),
           ),
         ),
-      ),
+        // Cold-start / connecting feedback so users don't bail during the
+        // 20-50s it can take to wake a sleeping server on first connect.
+        if (partyState.connecting) const ConnectingServerOverlay(),
+      ],
     );
   }
 
@@ -1056,6 +1085,117 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             icon: const Icon(FontAwesomeIcons.arrowRight, size: 18),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Full-screen overlay shown while we're establishing the socket connection.
+/// On a cold start the server can take 20-50s to wake, so instead of dead air
+/// we show a loader with reassuring, escalating copy so people wait it out.
+class ConnectingServerOverlay extends StatefulWidget {
+  const ConnectingServerOverlay({super.key});
+
+  @override
+  State<ConnectingServerOverlay> createState() =>
+      _ConnectingServerOverlayState();
+}
+
+class _ConnectingServerOverlayState extends State<ConnectingServerOverlay> {
+  Timer? _timer;
+  int _seconds = 0;
+
+  static const _messages = [
+    (0, "Connecting…", "Setting up your party."),
+    (
+      5,
+      "Waking the party server…",
+      "It's been quiet, so we're spinning it up.",
+    ),
+    (
+      15,
+      "Almost there…",
+      "First connection can take up to a minute. Hang tight!",
+    ),
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) setState(() => _seconds++);
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  (int, String, String) get _current {
+    var result = _messages.first;
+    for (final m in _messages) {
+      if (_seconds >= m.$1) result = m;
+    }
+    return result;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final primary = Theme.of(context).colorScheme.primary;
+    final msg = _current;
+    return Positioned.fill(
+      child: ClipRect(
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+          child: Container(
+            color: const Color(0xFF0B0E14).withValues(alpha: 0.82),
+            alignment: Alignment.center,
+            padding: const EdgeInsets.symmetric(horizontal: 40),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                SizedBox(
+                  width: 54,
+                  height: 54,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 3,
+                    color: primary.withValues(alpha: 0.9),
+                  ),
+                ),
+                const SizedBox(height: 28),
+                AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 300),
+                  child: Text(
+                    msg.$2,
+                    key: ValueKey(msg.$2),
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 300),
+                  child: Text(
+                    msg.$3,
+                    key: ValueKey(msg.$3),
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.6),
+                      fontSize: 14,
+                      height: 1.4,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }

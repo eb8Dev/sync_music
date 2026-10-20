@@ -1,6 +1,7 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_crashlytics/firebase_crashlytics.dart';
@@ -24,6 +25,12 @@ void main() async {
     // Initialize Remote Config
     await RemoteConfigService().initialize();
 
+    // Fire-and-forget wake-up ping. The server may be asleep (free hosting
+    // sleeps when idle and takes 20-50s to wake). Kicking it off now means it's
+    // warming up while the user is still on the home screen, so by the time they
+    // create or join a party the socket connects quickly.
+    _warmUpServer();
+
     // Initialize Push Notifications (FCM)
     await NotificationService().initialize();
 
@@ -44,6 +51,27 @@ void main() async {
   final prefs = await SharedPreferences.getInstance();
   final bool onboardingSeen = prefs.getBool('onboarding_seen') ?? false;
   runApp(ProviderScope(child: PartyApp(showOnboarding: !onboardingSeen)));
+}
+
+/// Pings the server's health endpoint so a sleeping instance starts waking
+/// immediately on launch. Fire-and-forget: never blocks startup or throws.
+void _warmUpServer() {
+  try {
+    final base = RemoteConfigService().getServerUrl();
+    if (base.isEmpty) return;
+    final url = Uri.parse("${base.replaceAll(RegExp(r'/$'), '')}/healthz");
+    http
+        .get(url)
+        .timeout(const Duration(seconds: 60))
+        .then((res) {
+          debugPrint("Server warm-up ping: ${res.statusCode}");
+        })
+        .catchError((e) {
+          debugPrint("Server warm-up ping failed (non-fatal): $e");
+        });
+  } catch (e) {
+    debugPrint("Server warm-up ping skipped: $e");
+  }
 }
 
 // ---------------- APP ROOT ----------------
